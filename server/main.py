@@ -180,14 +180,6 @@ async def ejecutar_prospeccion_async(task_id: str, query: str, max_results: int)
 def ejecutar_prospeccion(task_id: str, query: str, max_results: int):
     """Wrapper para ejecutar la tarea async en background."""
     asyncio.create_task(ejecutar_prospeccion_async(task_id, query, max_results))
-        task_store[task_id]["leads_count"] = count
-        logger.info(f"✅ Tarea {task_id}: Completada. {count} leads guardados.")
-
-    except Exception as e:
-        error_msg = str(e)
-        task_store[task_id]["status"] = TaskStatus.FAILED
-        task_store[task_id]["error"] = error_msg
-        logger.error(f"❌ Tarea {task_id}: Error - {error_msg}")
 
 
 # ============================================================================
