@@ -14,8 +14,11 @@ from typing import Optional
 from pydantic_settings import BaseSettings
 from pydantic import Field, field_validator
 from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
+# Cargar .env desde la raíz del proyecto (un nivel arriba de /server)
+ROOT_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(ROOT_DIR / ".env")
 
 
 class Settings(BaseSettings):
@@ -55,7 +58,7 @@ class Settings(BaseSettings):
         return v
 
     model_config = {
-        "env_file": ".env",
+        "env_file": str(ROOT_DIR / ".env"),
         "case_sensitive": False,
         "extra": "ignore",
     }

@@ -177,11 +177,6 @@ async def ejecutar_prospeccion_async(task_id: str, query: str, max_results: int)
         logger.error(f"❌ Tarea {task_id}: Error inesperado - {error_msg}")
 
 
-def ejecutar_prospeccion(task_id: str, query: str, max_results: int):
-    """Wrapper para ejecutar la tarea async en background."""
-    asyncio.create_task(ejecutar_prospeccion_async(task_id, query, max_results))
-
-
 # ============================================================================
 # Endpoints
 # ============================================================================
@@ -235,7 +230,7 @@ async def prospectar(
 
     # Agregar tarea en segundo plano (async)
     background_tasks.add_task(
-        ejecutar_prospeccion,
+        ejecutar_prospeccion_async,
         task_id,
         data.query,
         data.max_results

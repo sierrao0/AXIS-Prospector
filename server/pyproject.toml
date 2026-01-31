@@ -8,7 +8,9 @@ dependencies = [
     "apify-client>=2.4.1",
     "fastapi>=0.128.0",
     "playwright>=1.58.0",
+    "pydantic-settings>=2.12.0",
     "python-dotenv>=1.2.1",
+    "slowapi>=0.1.9",
     "supabase>=2.27.2",
     "uvicorn>=0.40.0",
 ]
