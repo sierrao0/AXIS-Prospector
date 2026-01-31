@@ -1,0 +1,23 @@
+# AXIS Prospector API - Dependencias
+# Framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+
+# Validación
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Servicios externos
+apify-client>=1.6.0
+supabase>=2.3.0
+playwright>=1.40.0
+
+# Utilidades
+python-dotenv>=1.0.0
+
+# Optimización y resiliencia
+tenacity>=8.2.0
+slowapi>=0.1.9
+
+# Desarrollo (opcional)
+httpx>=0.26.0

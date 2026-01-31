@@ -1,0 +1,41 @@
+# Docker Compose - AXIS Prospector
+# =================================
+# Uso: docker-compose up -d
+# Variables: Copia .env.example a .env
+
+services:
+  server:
+    build:
+      context: ./server
+      dockerfile: ../docker/Dockerfile.server
+    ports:
+      - "8000:8000"
+    environment:
+      # Variables sensibles desde .env (no hardcodear)
+      - APIFY_TOKEN=${APIFY_TOKEN}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+      - SUPABASE_PASSWORD=${SUPABASE_PASSWORD}
+      # Config app
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  client:
+    build:
+      context: ./client
+      dockerfile: ../docker/Dockerfile.client
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://server:8000/api/v1}
+    depends_on:
+      - server
+    restart: unless-stopped
