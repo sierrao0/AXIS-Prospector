@@ -6,6 +6,7 @@ Optimizaciones:
 - Retry con backoff exponencial
 - Batch inserts optimizados
 - Mejor manejo de errores
+- Soporte para campos de Deep Audit (Phase 1)
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from typing import List, Dict, Any, Optional
+from datetime import datetime
 
 from supabase import create_client, Client
 from tenacity import (
@@ -25,6 +27,7 @@ from tenacity import (
 )
 
 from config import get_settings
+from schemas import AuditStatus
 from services.exceptions import (
     DatabaseError,
     SupabaseConnectionError,
@@ -222,6 +225,173 @@ class DatabaseService:
             return response.count or 0
         
         return await loop.run_in_executor(_db_executor, _count_sync)
+
+    # -------------------------------------------------------------------------
+    # DEEP AUDIT METHODS (Phase 1)
+    # -------------------------------------------------------------------------
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=0.5, min=1, max=5),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        reraise=True,
+    )
+    def _update_audit_status_sync(self, lead_id: int, audit_status: str) -> bool:
+        """Actualiza el estado de auditoría de un lead."""
+        try:
+            response = self.client.table("leads").update(
+                {"audit_status": audit_status}
+            ).eq("id", lead_id).execute()
+            
+            if not response.data:
+                raise LeadNotFoundError(f"Lead {lead_id} no encontrado")
+            return True
+        except LeadNotFoundError:
+            raise
+        except Exception as e:
+            raise DatabaseError(f"Error actualizando audit_status: {e}")
+
+    async def actualizar_audit_status(self, lead_id: int, audit_status: AuditStatus) -> bool:
+        """
+        Actualiza el estado de auditoría de un lead.
+        
+        Args:
+            lead_id: ID del lead
+            audit_status: Nuevo estado de auditoría (pending, auditing, completed, failed)
+        """
+        loop = asyncio.get_event_loop()
+        try:
+            return await loop.run_in_executor(
+                _db_executor,
+                partial(self._update_audit_status_sync, lead_id, audit_status.value)
+            )
+        except (LeadNotFoundError, DatabaseError):
+            raise
+        except Exception as e:
+            logger.error(f"❌ Error actualizando audit_status para lead {lead_id}: {e}")
+            raise DatabaseError(f"Error inesperado: {e}")
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=0.5, min=1, max=5),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        reraise=True,
+    )
+    def _update_lead_audit_sync(self, lead_id: int, audit_data: Dict[str, Any]) -> bool:
+        """Actualiza un lead con los datos de auditoría completos."""
+        try:
+            update_payload = {
+                "audit_status": audit_data.get("audit_status", AuditStatus.COMPLETED.value),
+                "ai_score": audit_data.get("ai_score", 0),
+                "audit_data": audit_data.get("audit_data"),
+                "ssl_valid": audit_data.get("ssl_valid"),
+                "emails": audit_data.get("emails", []),
+                "tech_stack": audit_data.get("tech_stack", []),
+                "social_links": audit_data.get("social_links", {}),
+                "audit_completed_at": audit_data.get("audit_completed_at", datetime.utcnow().isoformat()),
+                # Legacy fields
+                "web_obsoleta": audit_data.get("web_obsoleta"),
+                "web_analisis_motivo": audit_data.get("web_analisis_motivo"),
+            }
+            
+            # Also update status if lead is promoted to "caliente"
+            if audit_data.get("status"):
+                update_payload["status"] = audit_data["status"]
+            
+            response = self.client.table("leads").update(
+                update_payload
+            ).eq("id", lead_id).execute()
+            
+            if not response.data:
+                raise LeadNotFoundError(f"Lead {lead_id} no encontrado")
+            return True
+        except LeadNotFoundError:
+            raise
+        except Exception as e:
+            raise DatabaseError(f"Error actualizando audit para lead: {e}")
+
+    async def guardar_audit_result(self, lead_id: int, audit_data: Dict[str, Any]) -> bool:
+        """
+        Guarda el resultado de la auditoría profunda para un lead.
+        
+        Args:
+            lead_id: ID del lead
+            audit_data: Diccionario con todos los campos de auditoría
+        """
+        loop = asyncio.get_event_loop()
+        try:
+            result = await loop.run_in_executor(
+                _db_executor,
+                partial(self._update_lead_audit_sync, lead_id, audit_data)
+            )
+            logger.debug(f"✅ Audit guardado para lead {lead_id} (score: {audit_data.get('ai_score')})")
+            return result
+        except (LeadNotFoundError, DatabaseError):
+            raise
+        except Exception as e:
+            logger.error(f"❌ Error guardando audit para lead {lead_id}: {e}")
+            raise DatabaseError(f"Error inesperado: {e}")
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=0.5, min=1, max=5),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        reraise=True,
+    )
+    def _batch_update_audits_sync(self, updates: List[Dict[str, Any]]) -> int:
+        """Actualiza múltiples leads con datos de auditoría en batch."""
+        updated = 0
+        for update in updates:
+            try:
+                lead_id = update.pop("id")
+                response = self.client.table("leads").update(update).eq("id", lead_id).execute()
+                if response.data:
+                    updated += 1
+            except Exception as e:
+                logger.warning(f"Error updating lead {update.get('id')}: {e}")
+        return updated
+
+    async def guardar_audits_batch(self, audits: List[Dict[str, Any]]) -> int:
+        """
+        Guarda resultados de auditoría para múltiples leads.
+        
+        Args:
+            audits: Lista de diccionarios con id y campos de audit
+            
+        Returns:
+            Número de leads actualizados
+        """
+        if not audits:
+            return 0
+        
+        loop = asyncio.get_event_loop()
+        try:
+            count = await loop.run_in_executor(
+                _db_executor,
+                partial(self._batch_update_audits_sync, audits)
+            )
+            logger.info(f"✅ {count}/{len(audits)} audits guardados en batch")
+            return count
+        except Exception as e:
+            logger.error(f"❌ Error en batch update de audits: {e}")
+            raise DatabaseError(f"Error guardando audits en batch: {e}")
+
+    async def obtener_leads_pending_audit(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        Obtiene leads que aún no han sido auditados.
+        
+        Args:
+            limit: Número máximo de leads a obtener
+        """
+        loop = asyncio.get_event_loop()
+        
+        def _fetch_sync() -> List[Dict[str, Any]]:
+            response = self.client.table("leads").select("*").eq(
+                "audit_status", AuditStatus.PENDING.value
+            ).limit(limit).execute()
+            return response.data or []
+        
+        return await loop.run_in_executor(_db_executor, _fetch_sync)
 
 
 # Instancia singleton del servicio (lazy initialization)

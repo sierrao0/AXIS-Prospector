@@ -63,3 +63,4 @@ htmlcov/
 *.local
 .turbo/
 .vercel/
+*PLAN.md
