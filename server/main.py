@@ -24,6 +24,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
+from datetime import datetime
 from config import setup_logging, validate_environment, get_settings
 from schemas import (
     ProspectRequest,
@@ -31,6 +32,9 @@ from schemas import (
     TaskStatusResponse,
     HealthResponse,
     TaskStatus,
+    LeadSchema,
+    AuditStatus,
+    calculate_ai_score,
 )
 from services.scraper import get_scraper_service, cleanup_scraper
 from services.database import get_database_service, cleanup_database
@@ -151,12 +155,83 @@ async def ejecutar_prospeccion_async(task_id: str, query: str, max_results: int)
 
         # 2. Guardar en Supabase (async)
         db = get_database_service()
-        count = await db.guardar_leads(leads)
+        saved_leads = await db.guardar_leads(leads) # Ahora retorna la lista de leads guardados
+        count = len(saved_leads)
 
-        # 3. Actualizar estado de la tarea
+        # 3. Deep Audit (Async Pipeline)
+        if saved_leads:
+            analyzer = get_analyzer_service()
+            logger.info(f"🔍 Iniciando Deep Audit para {count} leads...")
+            
+            async def process_audit(lead_data: Dict):
+                try:
+                    lead_id = lead_data["id"]
+                    website = lead_data.get("website")
+                    
+                    # Convertir a esquema para scoring
+                    lead_obj = LeadSchema(**lead_data)
+                    
+                    if not website:
+                        # Si no hay web (ej. solo Maps), score básico
+                        score = calculate_ai_score(lead_obj, None)
+                        await db.actualizar_audit_lead(lead_id, {
+                            "audit_status": AuditStatus.COMPLETED,
+                            "ai_score": score,
+                            "audit_completed_at": datetime.utcnow().isoformat()
+                        })
+                        return
+
+                    # Update status to auditing
+                    await db.actualizar_audit_lead(lead_id, {"audit_status": AuditStatus.AUDITING})
+
+                    # Execute audit
+                    audit_result = await analyzer.audit_website(website)
+                    
+                    # Calculate Score
+                    score = calculate_ai_score(lead_obj, audit_result)
+                    
+                    # Prepare update data for flat columns and JSONB
+                    tech_list = []
+                    if audit_result.tech_stack:
+                        if audit_result.tech_stack.cms: tech_list.append(audit_result.tech_stack.cms)
+                        if audit_result.tech_stack.framework: tech_list.append(audit_result.tech_stack.framework)
+                        if audit_result.tech_stack.ecommerce: tech_list.append(audit_result.tech_stack.ecommerce)
+
+                    update_data = {
+                        "audit_status": AuditStatus.FAILED if not audit_result.site_accessible else AuditStatus.COMPLETED,
+                        "audit_data": audit_result.to_db_json(),
+                        "ai_score": score,
+                        "ssl_valid": audit_result.ssl_valid,
+                        "web_obsoleta": audit_result.is_obsolete,
+                        "tech_stack": tech_list,
+                        "emails": audit_result.emails,
+                        "social_links": audit_result.social_links.to_dict(),
+                        "audit_completed_at": datetime.utcnow().isoformat()
+                    }
+                    
+                    # Update DB
+                    await db.actualizar_audit_lead(lead_id, update_data)
+                    
+                except Exception as e:
+                    logger.error(f"❌ Error auditing lead {lead_data.get('id')}: {e}")
+                    try:
+                        await db.actualizar_audit_lead(
+                            lead_data["id"], 
+                            {"audit_status": AuditStatus.FAILED}
+                        )
+                    except:
+                        pass
+
+            # Ejecutar auditorías concurrentemente
+            # La concurrencia está limitada internamente por CONTEXT_SEMAPHORE en analyzer.py
+            await asyncio.gather(*[process_audit(l) for l in saved_leads])
+            
+            logger.info(f"✅ Deep Audit completado para {count} leads")
+
+        # 4. Actualizar estado de la tarea
         task_store[task_id]["status"] = TaskStatus.COMPLETED
         task_store[task_id]["leads_count"] = count
-        logger.info(f"✅ Tarea {task_id}: Completada. {count} leads guardados.")
+        logger.info(f"✅ Tarea {task_id}: Completada globalmente.")
 
     except ScraperError as e:
         error_msg = f"Error en scraping: {e.message}"

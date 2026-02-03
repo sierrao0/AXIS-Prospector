@@ -63,18 +63,18 @@ class DatabaseService:
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    def _insert_batch_sync(self, leads: List[Dict[str, Any]]) -> int:
+    def _insert_batch_sync(self, leads: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Inserta un batch de leads de forma síncrona."""
         try:
             response = self.client.table("leads").insert(leads).execute()
-            return len(response.data) if response.data else 0
+            return response.data or []
         except Exception as e:
             error_msg = str(e).lower()
             if "connection" in error_msg or "network" in error_msg:
                 raise SupabaseConnectionError(f"Error de conexión: {e}")
             raise DatabaseError(f"Error insertando leads: {e}")
 
-    async def guardar_leads(self, leads: List[Dict[str, Any]]) -> int:
+    async def guardar_leads(self, leads: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Guarda leads en la tabla 'leads' de forma async con batching.
         
@@ -82,33 +82,33 @@ class DatabaseService:
             leads: Lista de diccionarios con datos de leads
             
         Returns:
-            Número de leads guardados
+            Lista de leads guardados con sus IDs
         """
         if not leads:
             logger.warning("⚠️ No hay leads para guardar")
-            return 0
+            return []
 
         loop = asyncio.get_event_loop()
-        total_guardados = 0
+        leads_guardados = []
         
         # Procesar en batches para evitar timeouts
         for i in range(0, len(leads), BATCH_SIZE):
             batch = leads[i:i + BATCH_SIZE]
             try:
-                count = await loop.run_in_executor(
+                saved_batch = await loop.run_in_executor(
                     _db_executor,
                     partial(self._insert_batch_sync, batch)
                 )
-                total_guardados += count
-                logger.debug(f"Batch {i//BATCH_SIZE + 1}: {count} leads guardados")
+                leads_guardados.extend(saved_batch)
+                logger.debug(f"Batch {i//BATCH_SIZE + 1}: {len(saved_batch)} leads guardados")
             except (SupabaseConnectionError, DatabaseError):
                 raise
             except Exception as e:
                 logger.error(f"❌ Error en batch {i//BATCH_SIZE + 1}: {e}")
                 raise DatabaseError(f"Error guardando batch: {e}")
 
-        logger.info(f"✅ {total_guardados} leads guardados en Supabase")
-        return total_guardados
+        logger.info(f"✅ {len(leads_guardados)} leads guardados en Supabase")
+        return leads_guardados
 
     @retry(
         stop=stop_after_attempt(3),
@@ -212,6 +212,42 @@ class DatabaseService:
         except Exception as e:
             logger.error(f"❌ Error actualizando lead {lead_id}: {e}")
             raise DatabaseError(f"Error inesperado: {e}")
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=0.5, min=1, max=5),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        reraise=True,
+    )
+    def _update_audit_sync(self, lead_id: int, audit_data: Dict[str, Any]) -> bool:
+        """Actualiza los datos de auditoría de un lead."""
+        try:
+            response = self.client.table("leads").update(audit_data).eq("id", lead_id).execute()
+            if not response.data:
+                raise LeadNotFoundError(f"Lead {lead_id} no encontrado para audit update")
+            return True
+        except LeadNotFoundError:
+            raise
+        except Exception as e:
+            raise DatabaseError(f"Error actualizando audit lead: {e}")
+
+    async def actualizar_audit_lead(self, lead_id: int, audit_data: Dict[str, Any]) -> bool:
+        """
+        Actualiza los resultados del audit en la base de datos.
+        
+        Args:
+            lead_id: ID del lead
+            audit_data: Diccionario con campos de audit (score, emails, stats, etc)
+        """
+        loop = asyncio.get_event_loop()
+        try:
+            return await loop.run_in_executor(
+                _db_executor,
+                partial(self._update_audit_sync, lead_id, audit_data)
+            )
+        except Exception as e:
+            logger.error(f"❌ Error guardando audit para lead {lead_id}: {e}")
+            raise DatabaseError(f"Error guardando audit: {e}")
 
     async def contar_leads(self, status: Optional[str] = None) -> int:
         """Cuenta el total de leads (opcionalmente filtrado por status)."""
