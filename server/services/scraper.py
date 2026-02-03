@@ -1,11 +1,14 @@
 """
 Servicio de extracción de leads usando Apify.
 
-Optimizaciones:
-- Async/await para operaciones I/O
-- Retry con backoff exponencial
-- Mejor manejo de errores
-- Filtros configurables
+🎯 THE HUNTER - Fase 1: Extracción de Leads
+
+Estrategia de filtrado:
+- ANTES: Solo leads sin web o con redes sociales (80/20 muy agresivo)
+- AHORA: Todos los leads pasan, el scoring decide la prioridad
+
+El Deep Audit y The Hunter Logic determinarán la calidad del lead,
+no el filtro de extracción.
 """
 from __future__ import annotations
 
@@ -32,7 +35,7 @@ logger = logging.getLogger(__name__)
 # ThreadPool para ejecutar operaciones sync de Apify en async
 _executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="apify_worker")
 
-# Dominios de redes sociales para filtro 80/20
+# Dominios de redes sociales (para clasificación, no filtrado)
 SOCIAL_MEDIA_DOMAINS: Set[str] = {
     "facebook.com",
     "instagram.com",
@@ -128,56 +131,81 @@ class ScraperService:
         return leads_encontrados
 
     def _procesar_dataset(self, dataset_id: str) -> List[Dict[str, Any]]:
-        """Procesa el dataset de Apify y filtra leads."""
+        """Procesa el dataset de Apify y formatea leads, eliminando duplicados locales."""
         leads = []
+        seen_websites: Set[str] = set()
+
         for item in self.client.dataset(dataset_id).iterate_items():
-            lead = self._filtrar_lead(item)
+            lead = self._formatear_lead(item)
             if lead:
+                # Deduplicación local (dentro del mismo batch de búsqueda)
+                website = lead.get("website")
+                if website:
+                    if website in seen_websites:
+                        continue
+                    seen_websites.add(website)
+                
                 leads.append(lead)
         return leads
 
-    def _filtrar_lead(self, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _formatear_lead(self, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
-        Aplica filtro 80/20: Solo leads sin web o con redes sociales.
+        🎯 THE HUNTER - Formatea un lead de Apify.
+        
+        CAMBIO IMPORTANTE: Ya no filtramos aquí. TODOS los leads pasan.
+        El Deep Audit y The Hunter Logic determinarán la prioridad.
+        
+        Clasificación inicial por status:
+        - 'caliente': Sin web O web es solo red social (MÁXIMA OPORTUNIDAD)
+        - 'tibio': Tiene web propia pero necesita evaluación
+        - 'frío': Casos edge
         
         Args:
             item: Datos crudos de Apify
             
         Returns:
-            Lead formateado o None si no pasa el filtro
+            Lead formateado (nunca None, todos pasan)
         """
         website = item.get("website") or ""
         website_lower = website.lower()
-
-        # Filtro: Solo si no tienen web o usan redes sociales
-        es_lead_valido = (
-            not website or
-            any(domain in website_lower for domain in SOCIAL_MEDIA_DOMAINS)
+        
+        # Clasificar el tipo de presencia web
+        has_website = bool(website)
+        is_social_only = has_website and any(
+            domain in website_lower for domain in SOCIAL_MEDIA_DOMAINS
         )
+        has_real_website = has_website and not is_social_only
+        
+        # Datos de reputación
+        rating = item.get("totalScore") or 0
+        reviews = item.get("reviewsCount") or 0
+        
+        # Determinar status inicial basado en presencia digital
+        if not has_website:
+            # 🎯 Sin web = MÁXIMA OPORTUNIDAD para The Architect
+            status = "caliente"
+            logger.debug(f"🎯 Lead sin web: {item.get('title')} - OPPORTUNITY")
+        elif is_social_only:
+            # Solo red social = Necesita web propia
+            status = "caliente"
+            logger.debug(f"📱 Lead solo social: {item.get('title')} - OPPORTUNITY")
+        elif rating >= 4.0 and reviews >= 50:
+            # Negocio establecido con web = Candidato para optimización
+            status = "tibio"
+        else:
+            # Tiene web, evaluación pendiente
+            status = "tibio"
 
-        if es_lead_valido:
-            # Determinar estado basado en indicadores de calidad
-            rating = item.get("totalScore") or 0
-            reviews = item.get("reviewsCount") or 0
-            
-            if not website:
-                status = "caliente"  # Sin web = Máxima prioridad
-            elif rating >= 4.0 and reviews >= 10:
-                status = "caliente"  # Buena reputación pero sin web propia
-            else:
-                status = "tibio"
-
-            return {
-                "name": item.get("title"),
-                "website": website or None,
-                "phone": item.get("phone"),
-                "rating": rating if rating else None,
-                "reviews_count": reviews if reviews else None,
-                "location": item.get("address"),
-                "category": item.get("categoryName"),
-                "status": status,
-            }
-        return None
+        return {
+            "name": item.get("title"),
+            "website": website or None,
+            "phone": item.get("phone"),
+            "rating": rating if rating else None,
+            "reviews_count": reviews if reviews else None,
+            "location": item.get("address"),
+            "category": item.get("categoryName"),
+            "status": status,
+        }
 
 
 # Instancia singleton del servicio (lazy initialization)

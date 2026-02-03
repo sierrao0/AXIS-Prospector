@@ -31,9 +31,19 @@ export const supabase = getSupabase();
 
 /**
  * Tipos para la tabla de leads (espejo del backend)
+ * 
+ * 🎯 THE HUNTER LOGIC:
+ * - ai_score: Calidad del lead (0-100)
+ * - opportunity_score: Qué tanto NECESITA nuestros servicios (0-100)
+ * 
+ * Categorías:
+ * - 80-100 ai_score = Hot (infraestructura sólida)
+ * - 60-79 = Warm (necesita mejoras)
+ * - 40-59 = Cold (problemas técnicos)
+ * - 0-39 + alto opportunity = OPPORTUNITY (sin web = The Architect target)
  */
 export interface Lead {
-  id: number;
+  id: number | string;
   name: string | null;
   website: string | null;
   phone: string | null;
@@ -45,6 +55,18 @@ export interface Lead {
   web_obsoleta: boolean | null;
   web_analisis_motivo: string | null;
   created_at: string;
+  
+  // Phase 1: Deep Audit Fields
+  audit_status?: 'pending' | 'auditing' | 'completed' | 'failed';
+  audit_data?: Record<string, any> | null;
+  ai_score?: number | null;
+  opportunity_score?: number | null;  // 🎯 THE HUNTER: Qué tanto necesita nuestros servicios
+  lead_category?: 'ARCHITECT_TARGET' | 'HOT_OPTIMIZATION' | 'WARM_IMPROVEMENT' | 'COLD_PROBLEMS' | 'ICE' | null;  // 🎯 Categoría final
+  ssl_valid?: boolean | null;
+  emails?: string[] | null;
+  tech_stack?: string[] | null;
+  social_links?: Record<string, string> | null;
+  audit_completed_at?: string | null;
 }
 
 export type LeadInsert = Omit<Lead, 'id' | 'created_at'>;

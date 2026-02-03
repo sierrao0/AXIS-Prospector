@@ -5,6 +5,7 @@ import { RefreshCw, Wifi, WifiOff, Users } from 'lucide-react';
 import { Toaster } from 'sonner';
 import { ProspectorForm } from '@/components/ProspectorForm';
 import { LeadsTable } from '@/components/LeadsTable';
+import { StatsCard } from '@/components/StatsCard';
 import { useLeads } from '@/hooks/useLeads';
 import { useProspector } from '@/hooks/useProspector';
 import { Button } from '@/components/ui/button';
@@ -48,18 +49,23 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+    <div className="min-h-screen bg-background">
       <Toaster position="top-right" richColors />
       
       {/* Header */}
-      <header className="border-b bg-white dark:bg-zinc-900">
+      <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur-md">
         <div className="container mx-auto flex items-center justify-between px-4 py-4">
           <div className="flex items-center gap-3">
-            <h1 className="text-xl font-bold">🎯 AXIS Prospector</h1>
-            <Badge variant={isRealtimeConnected ? 'default' : 'destructive'} className="gap-1">
+            <h1 className="text-2xl font-bold text-foreground tracking-tight">
+              AXIS Prospector
+            </h1>
+            <Badge 
+              variant={isRealtimeConnected ? 'default' : 'destructive'} 
+              className={`gap-1.5 font-medium ${isRealtimeConnected ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400' : ''}`}
+            >
               {isRealtimeConnected ? (
                 <>
-                  <Wifi className="size-3" />
+                  <Wifi className="size-3 animate-pulse" />
                   Realtime
                 </>
               ) : (
@@ -73,9 +79,14 @@ export default function DashboardPage() {
 
           <div className="flex items-center gap-4">
             {taskProgress && (
-              <span className="text-sm text-muted-foreground">{taskProgress}</span>
+              <span className="text-sm text-muted-foreground font-medium">{taskProgress}</span>
             )}
-            <Button variant="outline" size="sm" onClick={refetch}>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={refetch}
+              className="gap-2"
+            >
               <RefreshCw className="size-4" />
               Actualizar
             </Button>
@@ -85,19 +96,27 @@ export default function DashboardPage() {
 
       {/* Main Content */}
       <main className="container mx-auto px-4 py-8">
-        <div className="grid gap-8 lg:grid-cols-3">
+        {/* Stats Overview */}
+        <div className="mb-8 animate-fade-in">
+          <StatsCard leads={leads} />
+        </div>
+
+        {/* Content Grid */}
+        <div className="grid gap-8 lg:grid-cols-4 animate-fade-in" style={{ animationDelay: '0.1s' }}>
           {/* Sidebar - Formulario */}
           <div className="lg:col-span-1">
-            <ProspectorForm onTaskStarted={handleTaskStarted} />
+            <div className="sticky top-24">
+              <ProspectorForm onTaskStarted={handleTaskStarted} />
+            </div>
           </div>
 
           {/* Main - Tabla de Leads */}
-          <div className="lg:col-span-2">
-            <Card>
+          <div className="lg:col-span-3">
+            <Card className="border-border bg-card shadow-sm">
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <div>
-                    <CardTitle className="flex items-center gap-2">
+                    <CardTitle className="flex items-center gap-2 text-foreground">
                       <Users className="size-5" />
                       Leads
                     </CardTitle>
@@ -109,9 +128,9 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                 {error ? (
-                  <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-600 dark:border-red-800 dark:bg-red-950 dark:text-red-400">
+                  <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-destructive">
                     <p className="font-medium">Error cargando leads</p>
-                    <p className="text-sm">{error}</p>
+                    <p className="text-sm opacity-80">{error}</p>
                   </div>
                 ) : (
                   <LeadsTable leads={leads} isLoading={isLoading} />

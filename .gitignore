@@ -64,3 +64,4 @@ htmlcov/
 .turbo/
 .vercel/
 *PLAN.md
+PHASE1_*.md

@@ -41,10 +41,10 @@ export function ProspectorForm({ onTaskStarted }: ProspectorFormProps) {
   };
 
   return (
-    <Card>
+    <Card className="border-border bg-card shadow-sm">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Search className="size-5" />
+        <CardTitle className="flex items-center gap-2 text-foreground">
+          <Search className="size-5 text-muted-foreground" />
           Nueva Prospección
         </CardTitle>
         <CardDescription>
@@ -54,7 +54,7 @@ export function ProspectorForm({ onTaskStarted }: ProspectorFormProps) {
       <CardContent>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-2">
-            <label htmlFor="query" className="text-sm font-medium">
+            <label htmlFor="query" className="text-sm font-medium text-foreground">
               Búsqueda
             </label>
             <Input
@@ -63,11 +63,12 @@ export function ProspectorForm({ onTaskStarted }: ProspectorFormProps) {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               disabled={isLoading}
+              className="bg-background"
             />
           </div>
 
           <div className="flex flex-col gap-2">
-            <label htmlFor="maxResults" className="text-sm font-medium">
+            <label htmlFor="maxResults" className="text-sm font-medium text-foreground">
               Máximo de resultados
             </label>
             <Input
@@ -78,10 +79,15 @@ export function ProspectorForm({ onTaskStarted }: ProspectorFormProps) {
               value={maxResults}
               onChange={(e) => setMaxResults(Number(e.target.value))}
               disabled={isLoading}
+              className="bg-background"
             />
           </div>
 
-          <Button type="submit" disabled={isLoading} className="w-full">
+          <Button 
+            type="submit" 
+            disabled={isLoading} 
+            className="w-full font-medium"
+          >
             {isLoading ? (
               <>
                 <Loader2 className="size-4 animate-spin" />

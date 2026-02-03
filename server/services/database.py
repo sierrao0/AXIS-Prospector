@@ -14,10 +14,10 @@ import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union, Set
 from datetime import datetime
 
-from supabase import create_client, Client
+from supabase import create_client, Client, ClientOptions
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -52,27 +52,96 @@ class DatabaseService:
         if not settings.supabase_url or not settings.supabase_key:
             raise ValueError("SUPABASE_URL y SUPABASE_KEY son requeridos")
 
-        self.client: Client = create_client(settings.supabase_url, settings.supabase_key)
+        self.client: Client = create_client(
+            settings.supabase_url, 
+            settings.supabase_key,
+            options=ClientOptions(
+                persist_session=False,
+                auto_refresh_token=False
+            )
+        )
         self._is_initialized = True
         logger.info("✅ Conexión a Supabase establecida")
 
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=5),
-        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError, OSError)),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
     def _insert_batch_sync(self, leads: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Inserta un batch de leads de forma síncrona."""
+        """Inserta un batch de leads de forma síncrona con filtro de duplicados."""
         try:
-            response = self.client.table("leads").insert(leads).execute()
+            # 1. Filtrar duplicados antes de insertar (Best Practice)
+            leads_to_insert = self._filter_duplicates(leads)
+            
+            if not leads_to_insert:
+                logger.info("ℹ️ Todos los leads del batch ya existen o están duplicados.")
+                return []
+            
+            # 2. Insertar solo los nuevos
+            # Usamos upsert con ignore_duplicates=True como fallback si existe constraint en DB
+            response = self.client.table("leads").upsert(
+                leads_to_insert, 
+                on_conflict="website",  # Asumiendo que website es unique key principal
+                ignore_duplicates=True
+            ).execute()
+            
+            logger.info(f"✅ Insertados {len(response.data) if response.data else 0} leads nuevos")
             return response.data or []
+            
+        except OSError:
+            raise
         except Exception as e:
             error_msg = str(e).lower()
             if "connection" in error_msg or "network" in error_msg:
                 raise SupabaseConnectionError(f"Error de conexión: {e}")
             raise DatabaseError(f"Error insertando leads: {e}")
+
+    def _filter_duplicates(self, leads: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Filtra leads que ya existen en la base de datos verificando websites.
+        Implementa estrategia de 'Check-Then-Act' para minimizar errores de constraint.
+        """
+        if not leads:
+            return []
+
+        # Extraer websites válidos para verificación
+        websites_to_check = {l.get("website") for l in leads if l.get("website")}
+        
+        if not websites_to_check:
+            # Si no hay websites, pasamos todos (o podríamos filtrar por teléfono si implementado)
+            return leads
+
+        existing_websites: Set[str] = set()
+        
+        try:
+            # Consultar leads existentes con esos websites
+            # Supabase permite filtrar por lista usando 'in_'
+            response = self.client.table("leads") \
+                .select("website") \
+                .in_("website", list(websites_to_check)) \
+                .execute()
+                
+            for row in response.data:
+                if row.get("website"):
+                    existing_websites.add(row["website"])
+                    
+        except Exception as e:
+            logger.warning(f"⚠️ Error consultando duplicados (continuando con insert): {e}")
+            # En caso de error de lectura, intentamos insertar todos confiando en la DB
+
+        # Filtrar lista original
+        unique_leads = []
+        for lead in leads:
+            website = lead.get("website")
+            if website and website in existing_websites:
+                logger.debug(f"🔁 Lead ignorado (ya existe): {website}")
+                continue
+            unique_leads.append(lead)
+            
+        return unique_leads
 
     async def guardar_leads(self, leads: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -168,12 +237,13 @@ class DatabaseService:
             raise DatabaseError(f"Error inesperado: {e}")
 
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=0.5, min=1, max=5),
-        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=0.5, min=1, max=10),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError, OSError)),
         reraise=True,
     )
-    def _update_lead_sync(self, lead_id: int, nuevo_status: str) -> bool:
+
+    def _update_lead_sync(self, lead_id: Union[int, str], nuevo_status: str) -> bool:
         """Actualiza un lead de forma síncrona."""
         try:
             response = self.client.table("leads").update(
@@ -185,10 +255,13 @@ class DatabaseService:
             return True
         except LeadNotFoundError:
             raise
+        except OSError:
+            raise
         except Exception as e:
             raise DatabaseError(f"Error actualizando lead: {e}")
 
-    async def actualizar_estado_lead(self, lead_id: int, nuevo_status: str) -> bool:
+    async def actualizar_estado_lead(self, lead_id: Union[int, str], nuevo_status: str) -> bool:
+
         """
         Actualiza el estado de un lead de forma async.
         
@@ -214,12 +287,12 @@ class DatabaseService:
             raise DatabaseError(f"Error inesperado: {e}")
 
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=0.5, min=1, max=5),
-        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=0.5, min=1, max=10),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError, OSError)),
         reraise=True,
     )
-    def _update_audit_sync(self, lead_id: int, audit_data: Dict[str, Any]) -> bool:
+    def _update_audit_sync(self, lead_id: Union[int, str], audit_data: Dict[str, Any]) -> bool:
         """Actualiza los datos de auditoría de un lead."""
         try:
             response = self.client.table("leads").update(audit_data).eq("id", lead_id).execute()
@@ -228,10 +301,13 @@ class DatabaseService:
             return True
         except LeadNotFoundError:
             raise
+        except OSError:
+            # Re-raise OSError para que @retry lo capture (incluye Errno 35)
+            raise
         except Exception as e:
             raise DatabaseError(f"Error actualizando audit lead: {e}")
 
-    async def actualizar_audit_lead(self, lead_id: int, audit_data: Dict[str, Any]) -> bool:
+    async def actualizar_audit_lead(self, lead_id: Union[int, str], audit_data: Dict[str, Any]) -> bool:
         """
         Actualiza los resultados del audit en la base de datos.
         
@@ -272,7 +348,7 @@ class DatabaseService:
         retry=retry_if_exception_type((ConnectionError, TimeoutError)),
         reraise=True,
     )
-    def _update_audit_status_sync(self, lead_id: int, audit_status: str) -> bool:
+    def _update_audit_status_sync(self, lead_id: Union[int, str], audit_status: str) -> bool:
         """Actualiza el estado de auditoría de un lead."""
         try:
             response = self.client.table("leads").update(
@@ -287,7 +363,7 @@ class DatabaseService:
         except Exception as e:
             raise DatabaseError(f"Error actualizando audit_status: {e}")
 
-    async def actualizar_audit_status(self, lead_id: int, audit_status: AuditStatus) -> bool:
+    async def actualizar_audit_status(self, lead_id: Union[int, str], audit_status: AuditStatus) -> bool:
         """
         Actualiza el estado de auditoría de un lead.
         
@@ -308,12 +384,12 @@ class DatabaseService:
             raise DatabaseError(f"Error inesperado: {e}")
 
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=0.5, min=1, max=5),
-        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=0.5, min=1, max=10),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError, OSError)),
         reraise=True,
     )
-    def _update_lead_audit_sync(self, lead_id: int, audit_data: Dict[str, Any]) -> bool:
+    def _update_lead_audit_sync(self, lead_id: Union[int, str], audit_data: Dict[str, Any]) -> bool:
         """Actualiza un lead con los datos de auditoría completos."""
         try:
             update_payload = {
@@ -343,10 +419,12 @@ class DatabaseService:
             return True
         except LeadNotFoundError:
             raise
+        except OSError:
+            raise
         except Exception as e:
             raise DatabaseError(f"Error actualizando audit para lead: {e}")
 
-    async def guardar_audit_result(self, lead_id: int, audit_data: Dict[str, Any]) -> bool:
+    async def guardar_audit_result(self, lead_id: Union[int, str], audit_data: Dict[str, Any]) -> bool:
         """
         Guarda el resultado de la auditoría profunda para un lead.
         
