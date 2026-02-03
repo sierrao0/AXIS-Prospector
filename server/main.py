@@ -24,6 +24,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
+from datetime import datetime
 from config import setup_logging, validate_environment, get_settings
 from schemas import (
     ProspectRequest,
@@ -31,6 +32,11 @@ from schemas import (
     TaskStatusResponse,
     HealthResponse,
     TaskStatus,
+    LeadSchema,
+    AuditStatus,
+    calculate_ai_score,
+    calculate_opportunity_score,
+    get_lead_category,
 )
 from services.scraper import get_scraper_service, cleanup_scraper
 from services.database import get_database_service, cleanup_database
@@ -65,6 +71,8 @@ async def lifespan(app: FastAPI):
         # Pre-inicializar servicios para detectar errores temprano
         get_scraper_service()
         get_database_service()
+        analyzer = get_analyzer_service()
+        await analyzer.initialize()
         logger.info("✅ Servicios inicializados")
     except ValueError as e:
         logger.error(str(e))
@@ -151,12 +159,113 @@ async def ejecutar_prospeccion_async(task_id: str, query: str, max_results: int)
 
         # 2. Guardar en Supabase (async)
         db = get_database_service()
-        count = await db.guardar_leads(leads)
+        saved_leads = await db.guardar_leads(leads) # Ahora retorna la lista de leads guardados
+        count = len(saved_leads)
 
-        # 3. Actualizar estado de la tarea
+        # 3. Deep Audit (Async Pipeline)
+        if saved_leads:
+            analyzer = get_analyzer_service()
+            logger.info(f"🔍 Iniciando Deep Audit para {count} leads...")
+            
+            # Inicializar tracking de progreso
+            task_store[task_id]["progress"] = 0.0
+            task_store[task_id]["message"] = f"Iniciando auditoría de {count} leads..."
+            processed_count = 0
+            
+            async def process_audit(lead_data: Dict):
+                nonlocal processed_count
+                try:
+                    lead_id = lead_data["id"]
+                    website = lead_data.get("website")
+                    
+                    # Convertir a esquema para scoring
+                    lead_obj = LeadSchema(**lead_data)
+                    
+                    if not website:
+                        # Si no hay web (ej. solo Maps), score básico
+                        # THE HUNTER LOGIC: Sin web = MÁXIMA OPORTUNIDAD
+                        score = calculate_ai_score(lead_obj, None)
+                        opportunity = calculate_opportunity_score(lead_obj, None)
+                        category = get_lead_category(score, opportunity)
+                        
+                        await db.actualizar_audit_lead(lead_id, {
+                            "audit_status": AuditStatus.COMPLETED,
+                            "ai_score": score,
+                            "opportunity_score": opportunity,
+                            "lead_category": category,
+                            "audit_completed_at": datetime.utcnow().isoformat()
+                        })
+                        logger.info(f"📊 Lead sin web: ai_score={score}, opportunity={opportunity}, category={category}")
+                    else:
+                        # Update status to auditing
+                        await db.actualizar_audit_lead(lead_id, {"audit_status": AuditStatus.AUDITING})
+
+                        # Execute audit
+                        audit_result = await analyzer.audit_website(website)
+                        
+                        # Calculate Scores - THE HUNTER LOGIC
+                        score = calculate_ai_score(lead_obj, audit_result)
+                        opportunity = calculate_opportunity_score(lead_obj, audit_result)
+                        category = get_lead_category(score, opportunity)
+                        
+                        # Prepare update data for flat columns and JSONB
+                        tech_list = []
+                        if audit_result.tech_stack:
+                            if audit_result.tech_stack.cms: tech_list.append(audit_result.tech_stack.cms)
+                            if audit_result.tech_stack.framework: tech_list.append(audit_result.tech_stack.framework)
+                            if audit_result.tech_stack.ecommerce: tech_list.append(audit_result.tech_stack.ecommerce)
+
+                        update_data = {
+                            "audit_status": AuditStatus.FAILED if not audit_result.site_accessible else AuditStatus.COMPLETED,
+                            "audit_data": audit_result.to_db_json(),
+                            "ai_score": score,
+                            "opportunity_score": opportunity,
+                            "lead_category": category,
+                            "ssl_valid": audit_result.ssl_valid,
+                            "web_obsoleta": audit_result.is_obsolete,
+                            "tech_stack": tech_list,
+                            "emails": audit_result.emails,
+                            "social_links": audit_result.social_links.to_dict(),
+                            "audit_completed_at": datetime.utcnow().isoformat()
+                        }
+                        
+                        # Update DB
+                        await db.actualizar_audit_lead(lead_id, update_data)
+                        logger.info(f"📊 Lead auditado: ai_score={score}, opportunity={opportunity}, category={category}")
+                    
+                    # Update progress
+                    processed_count += 1
+                    progress_pct = (processed_count / count) * 100
+                    task_store[task_id]["progress"] = round(progress_pct, 1)
+                    task_store[task_id]["message"] = f"Auditando: {processed_count}/{count} leads ({int(progress_pct)}%)"
+                    
+                except Exception as e:
+                    logger.error(f"❌ Error auditing lead {lead_data.get('id')}: {e}")
+                    try:
+                        await db.actualizar_audit_lead(
+                            lead_data["id"], 
+                            {"audit_status": AuditStatus.FAILED}
+                        )
+                    except:
+                        pass
+                    # Aún si falla, contamos el progreso
+                    processed_count += 1
+                    task_store[task_id]["progress"] = round((processed_count / count) * 100, 1)
+
+            # Ejecutar auditorías concurrentemente
+            # La concurrencia está limitada internamente por CONTEXT_SEMAPHORE en analyzer.py
+            await asyncio.gather(*[process_audit(l) for l in saved_leads])
+            
+            logger.info(f"✅ Deep Audit completado para {count} leads")
+            task_store[task_id]["progress"] = 100.0
+            task_store[task_id]["message"] = "Prospección completada"
+
+        # 4. Actualizar estado de la tarea
+
+        # 4. Actualizar estado de la tarea
         task_store[task_id]["status"] = TaskStatus.COMPLETED
         task_store[task_id]["leads_count"] = count
-        logger.info(f"✅ Tarea {task_id}: Completada. {count} leads guardados.")
+        logger.info(f"✅ Tarea {task_id}: Completada globalmente.")
 
     except ScraperError as e:
         error_msg = f"Error en scraping: {e.message}"
@@ -175,19 +284,6 @@ async def ejecutar_prospeccion_async(task_id: str, query: str, max_results: int)
         task_store[task_id]["status"] = TaskStatus.FAILED
         task_store[task_id]["error"] = error_msg
         logger.error(f"❌ Tarea {task_id}: Error inesperado - {error_msg}")
-
-
-def ejecutar_prospeccion(task_id: str, query: str, max_results: int):
-    """Wrapper para ejecutar la tarea async en background."""
-    asyncio.create_task(ejecutar_prospeccion_async(task_id, query, max_results))
-        task_store[task_id]["leads_count"] = count
-        logger.info(f"✅ Tarea {task_id}: Completada. {count} leads guardados.")
-
-    except Exception as e:
-        error_msg = str(e)
-        task_store[task_id]["status"] = TaskStatus.FAILED
-        task_store[task_id]["error"] = error_msg
-        logger.error(f"❌ Tarea {task_id}: Error - {error_msg}")
 
 
 # ============================================================================
@@ -243,7 +339,7 @@ async def prospectar(
 
     # Agregar tarea en segundo plano (async)
     background_tasks.add_task(
-        ejecutar_prospeccion,
+        ejecutar_prospeccion_async,
         task_id,
         data.query,
         data.max_results
@@ -283,7 +379,9 @@ async def obtener_estado_tarea(request: Request, task_id: str):
         task_id=task_id,
         status=tarea["status"],
         leads_count=tarea.get("leads_count"),
-        error=tarea.get("error")
+        error=tarea.get("error"),
+        progress=tarea.get("progress"),
+        message=tarea.get("message")
     )
 
 
