@@ -28,6 +28,18 @@ class Settings(BaseSettings):
     app_name: str = "AXIS Prospector API"
     app_version: str = "1.1.0"
     debug: bool = False
+    api_key: str = Field(
+        default="",
+        description="API Key para proteger endpoints",
+        validation_alias="PROSPECTOR_API_KEY"
+    )
+    api_key_header: str = Field(default="x-api-key", description="Header para API Key")
+    request_cooldown_secs: int = Field(
+        default=20,
+        ge=5,
+        le=300,
+        validation_alias="REQUEST_COOLDOWN_SECS"
+    )
 
     # Apify
     apify_token: str = Field(default="", description="Token de API de Apify")
@@ -44,6 +56,18 @@ class Settings(BaseSettings):
     # Scraping
     max_leads_per_request: int = Field(default=100, ge=1, le=500)
     batch_size: int = Field(default=50, ge=10, le=200)
+    audit_retry_attempts: int = Field(
+        default=2,
+        ge=1,
+        le=5,
+        validation_alias="AUDIT_RETRY_ATTEMPTS"
+    )
+    audit_retry_backoff_secs: float = Field(
+        default=1.5,
+        ge=0.5,
+        le=10,
+        validation_alias="AUDIT_RETRY_BACKOFF_SECS"
+    )
 
     # Logging
     log_level: str = Field(default="INFO", pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$")

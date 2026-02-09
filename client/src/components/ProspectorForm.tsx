@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, FormEvent } from 'react';
+import { useState, FormEvent, useEffect } from 'react';
 import { Search, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { useProspector } from '@/hooks/useProspector';
 import { toast } from 'sonner';
@@ -20,7 +21,31 @@ interface ProspectorFormProps {
 export function ProspectorForm({ onTaskStarted }: ProspectorFormProps) {
   const [query, setQuery] = useState('');
   const [maxResults, setMaxResults] = useState(20);
-  const { prospect, isLoading } = useProspector();
+  const { prospect, isLoading, activeTaskId, getTaskStatus } = useProspector();
+  const [progress, setProgress] = useState(0);
+
+  // Polling interno para la barra de progreso
+  useEffect(() => {
+    if (!activeTaskId) {
+      return;
+    }
+
+    const interval = setInterval(async () => {
+      try {
+        const status = await getTaskStatus(activeTaskId);
+        if (status.status === 'running') {
+          setProgress(status.progress || 0);
+        } else if (status.status === 'completed') {
+          setProgress(100);
+          clearInterval(interval);
+        }
+      } catch {
+        // Ignorar errores de sondeo en UI
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [activeTaskId, getTaskStatus]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -32,9 +57,10 @@ export function ProspectorForm({ onTaskStarted }: ProspectorFormProps) {
 
     try {
       const response = await prospect(query, maxResults);
-      toast.success(`🚀 Prospección iniciada: ${response.task_id}`);
+      toast.success(`🚀 Prospección iniciada`);
       onTaskStarted?.(response.task_id);
       setQuery('');
+      setProgress(0); 
     } catch {
       toast.error('Error al iniciar la prospección');
     }
@@ -100,6 +126,17 @@ export function ProspectorForm({ onTaskStarted }: ProspectorFormProps) {
               </>
             )}
           </Button>
+
+          {/* Barra de Progreso Liquid Glass */}
+          {(isLoading || (activeTaskId && progress < 100)) && (
+            <div className="mt-2 space-y-1 animate-fade-in">
+              <div className="flex justify-between text-xs font-medium text-muted-foreground">
+                <span>Estado: {progress < 100 ? 'Auditando...' : 'Completado'}</span>
+                <span>{Math.round(progress)}%</span>
+              </div>
+              <Progress value={progress} className="h-2" />
+            </div>
+          )}
         </form>
       </CardContent>
     </Card>
