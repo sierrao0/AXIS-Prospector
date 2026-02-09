@@ -6,6 +6,7 @@ interface ClientEnv {
   apiUrl: string;
   supabaseUrl: string;
   supabaseAnonKey: string;
+  apiKey?: string;
 }
 
 function getEnvVar(key: string, fallback?: string): string {
@@ -22,6 +23,7 @@ export const env: ClientEnv = {
   apiUrl: getEnvVar('NEXT_PUBLIC_API_URL', 'http://localhost:8000/api/v1'),
   supabaseUrl: getEnvVar('NEXT_PUBLIC_SUPABASE_URL', 'https://znpcflxboiktmekgcdue.supabase.co'),
   supabaseAnonKey: getEnvVar('NEXT_PUBLIC_SUPABASE_ANON_KEY', ''),
+  apiKey: process.env.NEXT_PUBLIC_API_KEY || undefined,
 };
 
 // Validación en desarrollo

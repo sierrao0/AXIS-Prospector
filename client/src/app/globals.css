@@ -48,73 +48,90 @@
 
 :root {
   --radius: 0.5rem;
-  /* Light Mode: Clean whites with subtle shadows */
-  --background: oklch(0.985 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.965 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.965 0 0);
-  --muted-foreground: oklch(0.465 0 0);
-  --accent: oklch(0.965 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.184 27.3);
-  --border: oklch(0.915 0 0);
-  --input: oklch(0.915 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.205 0 0);
-  --chart-2: oklch(0.365 0 0);
-  --chart-3: oklch(0.525 0 0);
-  --chart-4: oklch(0.685 0 0);
-  --chart-5: oklch(0.845 0 0);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.965 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.915 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-  /* Semantic colors for light mode */
-  --success: oklch(0.527 0.154 152.5);
-  --success-foreground: oklch(0.985 0 0);
-  --warning: oklch(0.681 0.162 75.8);
-  --warning-foreground: oklch(0.145 0 0);
-  --info: oklch(0.577 0.184 243.2);
-  --info-foreground: oklch(0.985 0 0);
+  /* Light Mode: Glassy IOS White-Scale */
+  /* Background is a very subtle cool gray for contrast with white cards */
+  --background: oklch(0.96 0.005 250);
+  --foreground: oklch(0.13 0.01 250);
+  
+  /* Cards are semi-transparent white for glass effect */
+  --card: oklch(1 0 0.01 250 / 0.75);
+  --card-foreground: oklch(0.13 0.01 250);
+  
+  --popover: oklch(1 0 0.01 250 / 0.8);
+  --popover-foreground: oklch(0.13 0.01 250);
+  
+  /* Primary is a deep elegant black/charcoal */
+  --primary: oklch(0.13 0.01 250);
+  --primary-foreground: oklch(0.99 0 0);
+  
+  /* Secondary is a light gray for subtle elements */
+  --secondary: oklch(0.97 0 0 / 0.8);
+  --secondary-foreground: oklch(0.13 0.01 250);
+  
+  --muted: oklch(0.97 0 0 / 0.8);
+  --muted-foreground: oklch(0.55 0 0);
+  
+  --accent: oklch(0.97 0 0 / 0.8);
+  --accent-foreground: oklch(0.13 0.01 250);
+  
+  --destructive: oklch(0.65 0.22 28);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  /* Borders are barely visible, creating that clean IOS feel */
+  --border: oklch(0.92 0 0 / 0.6);
+  --input: oklch(0.92 0 0 / 0.6);
+  --ring: oklch(0.7 0 0);
+  
+  --chart-1: oklch(0.25 0.02 250);
+  --chart-2: oklch(0.55 0 0);
+  --chart-3: oklch(0.75 0 0);
+  --chart-4: oklch(0.85 0 0);
+  --chart-5: oklch(0.95 0 0);
+  
+  --sidebar: oklch(0.97 0.005 250 / 0.75);
+  --sidebar-foreground: oklch(0.13 0.01 250);
+  --sidebar-primary: oklch(0.13 0.01 250);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.95 0 0 / 0.8);
+  --sidebar-accent-foreground: oklch(0.13 0.01 250);
+  --sidebar-border: oklch(0.92 0 0);
+  --sidebar-ring: oklch(0.7 0 0);
+  
+  /* Semantic colors */
+  --success: oklch(0.65 0.18 150);
+  --success-foreground: oklch(0.99 0 0);
+  --warning: oklch(0.85 0.15 80);
+  --warning-foreground: oklch(0.13 0.01 250);
+  --info: oklch(0.6 0.15 250);
+  --info-foreground: oklch(0.99 0 0);
 }
 
 .dark {
   /* Dark Mode: Professional grayscale with layered depth */
   --background: oklch(0.098 0 0);
   --foreground: oklch(0.955 0 0);
-  --card: oklch(0.135 0 0);
+  --card: oklch(0.135 0 0 / 0.65);
   --card-foreground: oklch(0.955 0 0);
-  --popover: oklch(0.135 0 0);
+  --popover: oklch(0.135 0 0 / 0.75);
   --popover-foreground: oklch(0.955 0 0);
   --primary: oklch(0.955 0 0);
   --primary-foreground: oklch(0.098 0 0);
-  --secondary: oklch(0.185 0 0);
+  --secondary: oklch(0.185 0 0 / 0.7);
   --secondary-foreground: oklch(0.955 0 0);
-  --muted: oklch(0.185 0 0);
+  --muted: oklch(0.185 0 0 / 0.7);
   --muted-foreground: oklch(0.585 0 0);
-  --accent: oklch(0.185 0 0);
+  --accent: oklch(0.185 0 0 / 0.7);
   --accent-foreground: oklch(0.955 0 0);
   --destructive: oklch(0.577 0.184 27.3);
-  --border: oklch(0.225 0 0);
-  --input: oklch(0.225 0 0);
+  --border: oklch(0.225 0 0 / 0.6);
+  --input: oklch(0.225 0 0 / 0.6);
   --ring: oklch(0.455 0 0);
   --chart-1: oklch(0.955 0 0);
   --chart-2: oklch(0.755 0 0);
   --chart-3: oklch(0.555 0 0);
   --chart-4: oklch(0.355 0 0);
   --chart-5: oklch(0.155 0 0);
-  --sidebar: oklch(0.098 0 0);
+  --sidebar: oklch(0.098 0 0 / 0.75);
   --sidebar-foreground: oklch(0.955 0 0);
   --sidebar-primary: oklch(0.955 0 0);
   --sidebar-primary-foreground: oklch(0.098 0 0);
@@ -139,6 +156,13 @@
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
+  
+  /* Liquid Glass Effects */
+  .bg-card, .bg-popover, .bg-sidebar {
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+  
   /* Improved focus states for accessibility */
   :focus-visible {
     @apply outline-2 outline-offset-2 outline-ring;

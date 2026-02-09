@@ -1,4 +1,4 @@
-# 🕵️‍♂️ BusinesScraper: The Hunter Module
+# 🕵️‍♂️ SIERRA | Prospector
 
 <div align="center">
 
@@ -18,7 +18,7 @@
 
 ## 🎯 Misión
 
-**BusinesScraper** es el núcleo de prospección inteligente de **AXIS Agency**. No es un simple scraper; es un **motor de inferencia asíncrono** diseñado para descubrir, calificar y auditar prospectos B2B en tiempo real.
+**Prospector** es el núcleo de prospección inteligente de **Sierra Agency**. No es un simple scraper; es un **motor de inferencia asíncrono** diseñado para descubrir, calificar y auditar prospectos B2B en tiempo real.
 
 > *"Encontrar el 20% de clientes que generan el 80% del valor."*
 
@@ -45,7 +45,7 @@ Este módulo automatiza el ciclo de vida inicial del lead:
 ## 🏗️ Arquitectura
 
 ```
-BusinesScraper/
+Prospector/
 ├── client/                 # Frontend Next.js 16
 │   ├── src/
 │   │   ├── app/           # App Router (pages)

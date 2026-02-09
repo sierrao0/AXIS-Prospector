@@ -14,12 +14,14 @@ from __future__ import annotations
 import uuid
 import asyncio
 import logging
-from typing import Dict, Optional
+import hmac
+from typing import Dict, Optional, Tuple
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, status, Request
+from fastapi import FastAPI, HTTPException, BackgroundTasks, status, Request, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -37,6 +39,7 @@ from schemas import (
     calculate_ai_score,
     calculate_opportunity_score,
     get_lead_category,
+    ErrorResponse,
 )
 from services.scraper import get_scraper_service, cleanup_scraper
 from services.database import get_database_service, cleanup_database
@@ -57,6 +60,55 @@ limiter = Limiter(key_func=get_remote_address)
 
 # Almacén en memoria para el estado de tareas (en producción usar Redis)
 task_store: Dict[str, Dict] = {}
+recent_queries: Dict[Tuple[str, str], datetime] = {}
+
+
+def _get_client_ip(request: Request) -> str:
+    """Obtiene IP del cliente (fallback a 'unknown')."""
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _cleanup_recent_queries(cutoff_minutes: int = 10) -> None:
+    """Limpia queries viejas para evitar crecimiento en memoria."""
+    if not recent_queries:
+        return
+    cutoff = datetime.utcnow().timestamp() - (cutoff_minutes * 60)
+    for key, ts in list(recent_queries.items()):
+        if ts.timestamp() < cutoff:
+            recent_queries.pop(key, None)
+
+
+def _enforce_query_cooldown(request: Request, query: str) -> None:
+    """Previene spam: mismo IP + query en un intervalo corto."""
+    settings = get_settings()
+    _cleanup_recent_queries()
+    ip = _get_client_ip(request)
+    key = (ip, query.lower())
+    now = datetime.utcnow()
+    last = recent_queries.get(key)
+    if last and (now - last).total_seconds() < settings.request_cooldown_secs:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Solicitud duplicada. Espera {settings.request_cooldown_secs}s antes de reintentar."
+        )
+    recent_queries[key] = now
+
+
+def _verify_api_key(
+    x_api_key: Optional[str] = Header(default=None, alias="x-api-key"),
+) -> None:
+    """Valida API Key si está configurada en entorno."""
+    settings = get_settings()
+    if not settings.api_key:
+        return
+    provided = x_api_key or ""
+    if not hmac.compare_digest(provided, settings.api_key):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="API key inválida o ausente"
+        )
 
 
 @asynccontextmanager
@@ -113,6 +165,16 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    """Agrega un request_id para trazabilidad."""
+    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers["x-request-id"] = request_id
+    return response
+
+
 # ============================================================================
 # Exception Handlers
 # ============================================================================
@@ -123,7 +185,12 @@ async def axis_error_handler(request: Request, exc: AXISProspectorError):
     logger.error(f"Error de aplicación: {exc.message}")
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": exc.message, "type": type(exc).__name__}
+        content=ErrorResponse(
+            request_id=getattr(request.state, "request_id", "unknown"),
+            error="application_error",
+            detail=exc.message,
+            type=type(exc).__name__,
+        ).model_dump(mode="json")
     )
 
 
@@ -132,7 +199,41 @@ async def lead_not_found_handler(request: Request, exc: LeadNotFoundError):
     """Manejador para leads no encontrados."""
     return JSONResponse(
         status_code=status.HTTP_404_NOT_FOUND,
-        content={"detail": exc.message}
+        content=ErrorResponse(
+            request_id=getattr(request.state, "request_id", "unknown"),
+            error="not_found",
+            detail=exc.message,
+            type=type(exc).__name__,
+        ).model_dump(mode="json")
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Manejador para HTTPException con respuesta estandarizada."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=ErrorResponse(
+            request_id=getattr(request.state, "request_id", "unknown"),
+            error="http_error",
+            detail=str(exc.detail),
+            type="HTTPException",
+        ).model_dump(mode="json")
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Manejador para errores de validación de request."""
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content=ErrorResponse(
+            request_id=getattr(request.state, "request_id", "unknown"),
+            error="validation_error",
+            detail="Error de validación en el request",
+            type="RequestValidationError",
+            errors=exc.errors(),
+        ).model_dump(mode="json")
     )
 
 
@@ -171,6 +272,19 @@ async def ejecutar_prospeccion_async(task_id: str, query: str, max_results: int)
             task_store[task_id]["progress"] = 0.0
             task_store[task_id]["message"] = f"Iniciando auditoría de {count} leads..."
             processed_count = 0
+
+            async def audit_with_retry(website: str):
+                """Ejecuta auditoría con retry simple y backoff."""
+                attempts = settings.audit_retry_attempts
+                for attempt in range(1, attempts + 1):
+                    audit = await analyzer.audit_website(website)
+                    if audit.site_accessible:
+                        return audit
+                    if attempt < attempts:
+                        wait_seconds = settings.audit_retry_backoff_secs * attempt
+                        logger.warning(f"⚠️ Audit falló, reintentando en {wait_seconds:.1f}s ({attempt}/{attempts})")
+                        await asyncio.sleep(wait_seconds)
+                return audit
             
             async def process_audit(lead_data: Dict):
                 nonlocal processed_count
@@ -189,7 +303,7 @@ async def ejecutar_prospeccion_async(task_id: str, query: str, max_results: int)
                         category = get_lead_category(score, opportunity)
                         
                         await db.actualizar_audit_lead(lead_id, {
-                            "audit_status": AuditStatus.COMPLETED,
+                            "audit_status": AuditStatus.COMPLETED.value,
                             "ai_score": score,
                             "opportunity_score": opportunity,
                             "lead_category": category,
@@ -198,10 +312,10 @@ async def ejecutar_prospeccion_async(task_id: str, query: str, max_results: int)
                         logger.info(f"📊 Lead sin web: ai_score={score}, opportunity={opportunity}, category={category}")
                     else:
                         # Update status to auditing
-                        await db.actualizar_audit_lead(lead_id, {"audit_status": AuditStatus.AUDITING})
+                        await db.actualizar_audit_lead(lead_id, {"audit_status": AuditStatus.AUDITING.value})
 
                         # Execute audit
-                        audit_result = await analyzer.audit_website(website)
+                        audit_result = await audit_with_retry(website)
                         
                         # Calculate Scores - THE HUNTER LOGIC
                         score = calculate_ai_score(lead_obj, audit_result)
@@ -216,7 +330,7 @@ async def ejecutar_prospeccion_async(task_id: str, query: str, max_results: int)
                             if audit_result.tech_stack.ecommerce: tech_list.append(audit_result.tech_stack.ecommerce)
 
                         update_data = {
-                            "audit_status": AuditStatus.FAILED if not audit_result.site_accessible else AuditStatus.COMPLETED,
+                            "audit_status": (AuditStatus.FAILED.value if not audit_result.site_accessible else AuditStatus.COMPLETED.value),
                             "audit_data": audit_result.to_db_json(),
                             "ai_score": score,
                             "opportunity_score": opportunity,
@@ -244,7 +358,7 @@ async def ejecutar_prospeccion_async(task_id: str, query: str, max_results: int)
                     try:
                         await db.actualizar_audit_lead(
                             lead_data["id"], 
-                            {"audit_status": AuditStatus.FAILED}
+                            {"audit_status": AuditStatus.FAILED.value}
                         )
                     except:
                         pass
@@ -303,18 +417,19 @@ async def health_check():
 
 
 @app.post(
-    "/api/v1/prospectar",
+    "/api/v1/prospect",
     response_model=ProspectResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    tags=["Prospección"],
-    summary="Iniciar prospección de leads",
-    description="Inicia una tarea en segundo plano para buscar leads en Google Maps."
+    tags=["Prospecting"],
+    summary="Start lead prospecting",
+    description="Initiates a background task to search for leads on Google Maps."
 )
 @limiter.limit("10/minute")
-async def prospectar(
+async def prospect(
     request: Request,
     data: ProspectRequest,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    _: None = Depends(_verify_api_key)
 ):
     """
     Inicia una prospección de leads.
@@ -325,6 +440,7 @@ async def prospectar(
     La búsqueda se ejecuta en segundo plano y los resultados se guardan en Supabase.
     Rate limit: 10 requests por minuto.
     """
+    _enforce_query_cooldown(request, data.query)
     # Generar ID único para la tarea
     task_id = str(uuid.uuid4())
 
@@ -355,14 +471,18 @@ async def prospectar(
 
 
 @app.get(
-    "/api/v1/tareas/{task_id}",
+    "/api/v1/tasks/{task_id}",
     response_model=TaskStatusResponse,
-    tags=["Prospección"],
-    summary="Consultar estado de tarea",
-    description="Obtiene el estado actual de una tarea de prospección."
+    tags=["Prospecting"],
+    summary="Get task status",
+    description="Gets the current status of a prospecting task."
 )
 @limiter.limit("60/minute")
-async def obtener_estado_tarea(request: Request, task_id: str):
+async def get_task_status(
+    request: Request,
+    task_id: str,
+    _: None = Depends(_verify_api_key)
+):
     """
     Consulta el estado de una tarea de prospección.
     
@@ -388,26 +508,27 @@ async def obtener_estado_tarea(request: Request, task_id: str):
 @app.get(
     "/api/v1/leads",
     tags=["Leads"],
-    summary="Listar leads",
-    description="Obtiene la lista de leads guardados en la base de datos."
+    summary="List leads",
+    description="Gets the list of saved leads from the database."
 )
 @limiter.limit("30/minute")
-async def listar_leads(
+async def list_leads(
     request: Request,
     limit: int = 50,
     offset: int = 0,
-    estado: Optional[str] = None
+    status: Optional[str] = None,
+    _: None = Depends(_verify_api_key)
 ):
     """
-    Lista los leads guardados.
+    Lists saved leads.
     
-    - **limit**: Número máximo de resultados (default: 50)
-    - **offset**: Desplazamiento para paginación (default: 0)
-    - **estado**: Filtrar por estado (opcional)
+    - **limit**: Maximum number of results (default: 50)
+    - **offset**: Pagination offset (default: 0)
+    - **status**: Filter by status (optional)
     """
     db = get_database_service()
-    leads = await db.obtener_leads(limit=limit, offset=offset, status=estado)
-    total = await db.contar_leads(status=estado)
+    leads = await db.obtener_leads(limit=limit, offset=offset, status=status)
+    total = await db.contar_leads(status=status)
     
     return {
         "count": len(leads),
@@ -420,34 +541,35 @@ async def listar_leads(
 
 
 @app.patch(
-    "/api/v1/leads/{lead_id}/estado",
+    "/api/v1/leads/{lead_id}/status",
     tags=["Leads"],
-    summary="Actualizar estado de lead",
-    description="Actualiza el estado de un lead específico."
+    summary="Update lead status",
+    description="Updates the status of a specific lead."
 )
 @limiter.limit("30/minute")
-async def actualizar_lead(
+async def update_lead(
     request: Request,
-    lead_id: int,
-    nuevo_estado: str
+    lead_id: str,
+    new_status: str,
+    _: None = Depends(_verify_api_key)
 ):
     """
-    Actualiza el estado de un lead.
+    Updates the status of a lead.
     
-    - **lead_id**: ID del lead
-    - **nuevo_estado**: Nuevo estado (caliente, tibio, frío, contactado, cerrado)
+    - **lead_id**: Lead ID
+    - **new_status**: New status (hot, warm, cold, contacted, closed)
     """
-    estados_validos = {"caliente", "tibio", "frío", "contactado", "cerrado"}
-    if nuevo_estado not in estados_validos:
+    valid_statuses = {"hot", "warm", "cold", "contacted", "closed"}
+    if new_status not in valid_statuses:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Estado inválido. Valores permitidos: {estados_validos}"
+            detail=f"Invalid status. Allowed values: {valid_statuses}"
         )
     
     db = get_database_service()
-    await db.actualizar_estado_lead(lead_id, nuevo_estado)
+    await db.actualizar_estado_lead(lead_id, new_status)
     
-    return {"message": f"Lead {lead_id} actualizado a '{nuevo_estado}'"}
+    return {"message": f"Lead {lead_id} updated to '{new_status}'"}
 
 
 # ============================================================================

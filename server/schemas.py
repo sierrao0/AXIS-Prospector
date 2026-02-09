@@ -250,6 +250,16 @@ class HealthResponse(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
+class ErrorResponse(BaseModel):
+    """Respuesta de error estandarizada."""
+    request_id: str
+    error: str
+    detail: str
+    type: Optional[str] = None
+    errors: Optional[List[Dict[str, Any]]] = None
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
 # =============================================================================
 # AI SCORE CALCULATION - "THE HUNTER LOGIC"
 # =============================================================================

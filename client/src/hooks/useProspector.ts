@@ -61,7 +61,7 @@ export function useProspector(): UseProspectorReturn {
           max_results: maxResults,
         };
 
-        const { data } = await api.post<ProspectResponse>('/prospectar', payload);
+        const { data } = await api.post<ProspectResponse>('/prospect', payload);
         setActiveTaskId(data.task_id);
         return data;
       } catch (err) {

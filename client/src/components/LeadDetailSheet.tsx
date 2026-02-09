@@ -12,12 +12,13 @@ import {
   Globe, 
   Mail, 
   Shield, 
-  AlertTriangle, 
   ExternalLink,
   MapPin,
-  Store,
   Phone,
-  Info
+  Star,
+  Zap,
+  Code2,
+  Share2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -32,237 +33,272 @@ export function LeadDetailSheet({ lead, open, onOpenChange }: LeadDetailSheetPro
 
   const getScoreColor = (score: number | null | undefined) => {
     if (score === null || score === undefined) return "bg-muted text-muted-foreground";
-    if (score >= 80) return "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20";
-    if (score >= 60) return "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20";
-    if (score >= 40) return "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20";
-    return "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20";
+    if (score >= 80) return "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400";
+    if (score >= 60) return "bg-amber-500/15 text-amber-600 dark:text-amber-400";
+    if (score >= 40) return "bg-orange-500/15 text-orange-600 dark:text-orange-400";
+    return "bg-rose-500/15 text-rose-600 dark:text-rose-400";
   };
 
-  const getScoreExplanation = (lead: Lead) => {
-    const parts = [];
-    if (lead.ssl_valid) parts.push("• SSL Seguro (+15)");
-    if (lead.emails?.length) parts.push("• Emails encontrados (+10)");
-    if (lead.tech_stack?.length && lead.website && !lead.web_obsoleta) parts.push("• Stack Moderno (+10)");
-    if (lead.social_links && Object.keys(lead.social_links).length > 0) parts.push("• Redes Sociales (+5/u)");
-    if (!lead.website) parts.push("• Sin Website (-30)");
-    
-    return "Factores de Scoring:\n" + parts.join("\n") || "Sin datos suficientes";
+  const getScoreLabel = (score: number | null | undefined) => {
+    if (score === null || score === undefined) return "Unknown";
+    if (score >= 80) return "Excellent";
+    if (score >= 60) return "Good";
+    if (score >= 40) return "Fair";
+    return "Needs Work";
   };
+
+  const hasContactInfo = lead.website || lead.phone;
+  const hasEmails = lead.emails && lead.emails.length > 0;
+  const hasSocials = lead.social_links && Object.keys(lead.social_links).length > 0;
+  const hasTechStack = lead.tech_stack && lead.tech_stack.length > 0;
+  const hasAuditData = lead.website && (lead.ssl_valid !== null || hasTechStack || hasEmails || hasSocials);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-[400px] sm:w-[600px] overflow-y-auto">
-        <SheetHeader className="pb-4 border-b">
-          <div className="flex items-center justify-between mb-2">
+      <SheetContent className="w-[420px] sm:w-[540px] overflow-y-auto p-0">
+        {/* Hero Header */}
+        <div className="relative px-6 pt-6 pb-5 bg-gradient-to-b from-muted/80 to-background border-b">
+          <SheetHeader className="space-y-3">
+            {/* Score & Status Row */}
             <div className="flex items-center gap-2">
-              <div className="group relative">
-                 <Badge 
-                    variant="outline" 
-                    className={cn("text-white font-bold cursor-help pr-2", getScoreColor(lead.ai_score))}
-                    title={getScoreExplanation(lead)}
-                 >
-                    AI Score: {lead.ai_score ?? 0}
-                    <Info className="ml-1.5 h-3.5 w-3.5 opacity-80" />
-                 </Badge>
+              <div className={cn(
+                "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold",
+                getScoreColor(lead.ai_score)
+              )}>
+                <Zap className="h-3.5 w-3.5" />
+                <span>{lead.ai_score ?? 0}</span>
+                <span className="opacity-70">•</span>
+                <span className="font-medium">{getScoreLabel(lead.ai_score)}</span>
               </div>
               
-              {lead.status === 'caliente' && <Badge className="bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20">Hot</Badge>}
-              {lead.audit_status === 'auditing' && <Badge variant="secondary" className="animate-pulse">Auditing...</Badge>}
+              {lead.status === 'caliente' && (
+                <Badge className="bg-rose-500/15 text-rose-600 dark:text-rose-400 border-0">
+                  Hot Lead
+                </Badge>
+              )}
+              
+              {lead.audit_status === 'auditing' && (
+                <Badge variant="secondary" className="animate-pulse border-0">
+                  Auditing...
+                </Badge>
+              )}
             </div>
-            {lead.rating && (
-                <div className="flex items-center gap-1 text-xs font-medium text-amber-500">
-                    <span className="text-sm">★</span> {lead.rating} ({lead.reviews_count})
+            
+            {/* Title */}
+            <SheetTitle className="text-xl font-bold leading-tight pr-8">
+              {lead.name}
+            </SheetTitle>
+            
+            {/* Meta Info */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+              {lead.category && (
+                <span className="font-medium text-foreground/80">{lead.category}</span>
+              )}
+              {lead.rating && (
+                <div className="flex items-center gap-1 text-amber-500">
+                  <Star className="h-3.5 w-3.5 fill-current" />
+                  <span className="font-medium">{lead.rating}</span>
+                  {lead.reviews_count && (
+                    <span className="text-muted-foreground text-xs">({lead.reviews_count})</span>
+                  )}
                 </div>
-            )}
-          </div>
-          
-          <SheetTitle className="text-2xl font-bold leading-tight">{lead.name}</SheetTitle>
-          
-          <div className="flex flex-col gap-1.5 mt-2 text-sm text-muted-foreground">
-             <div className="flex items-center gap-2">
-                <Store className="h-4 w-4 shrink-0" />
-                <span>{lead.category || "Categoría desconocida"}</span>
-             </div>
-             <div className="flex items-start gap-2">
+              )}
+            </div>
+            
+            {lead.location && (
+              <div className="flex items-start gap-2 text-sm text-muted-foreground">
                 <MapPin className="h-4 w-4 shrink-0 mt-0.5" />
-                <span className="line-clamp-2">{lead.location || "Ubicación desconocida"}</span>
-             </div>
-          </div>
-        </SheetHeader>
+                <span className="line-clamp-2">{lead.location}</span>
+              </div>
+            )}
+          </SheetHeader>
+        </div>
 
-        <div className="space-y-6 pt-6">
-          {/* Contact Info Card */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 bg-muted/60 rounded-lg border">
-            <div className="space-y-1.5">
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                 <Globe className="h-3.5 w-3.5" /> Website
-              </h4>
-              {lead.website ? (
-                <a 
-                  href={lead.website} 
-                  target="_blank" 
-                  rel="noreferrer"
-                  className="flex items-center gap-2 text-foreground hover:text-muted-foreground transition-colors break-all text-sm font-medium"
-                >
-                  {(() => {
-                    try {
-                      return new URL(lead.website).hostname;
-                    } catch {
-                      return "Ver enlace";
-                    }
-                  })()}
-                  <ExternalLink className="h-3 w-3" />
-                </a>
-              ) : (
-                <span className="text-muted-foreground text-sm flex items-center gap-2">
-                  <XCircle className="h-4 w-4 opacity-50" /> No disponible
-                </span>
-              )}
-            </div>
-
-            <div className="space-y-1.5">
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                <Phone className="h-3.5 w-3.5" /> Teléfono
-              </h4>
-              {lead.phone ? (
-                 <a href={`tel:${lead.phone}`} className="text-sm font-medium hover:text-foreground/80 block truncate">
-                    {lead.phone}
-                 </a>
-              ) : (
-                <span className="text-muted-foreground text-sm flex items-center gap-2">
-                   <AlertTriangle className="h-3.5 w-3.5 opacity-50" /> No disponible
-                </span>
-              )}
-            </div>
-          </div>
+        <div className="px-6 py-5 space-y-5">
+          
+          {/* Contact Section */}
+          {hasContactInfo && (
+            <section className="space-y-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Contact
+              </h3>
+              <div className="grid gap-2">
+                {lead.website && (
+                  <a 
+                    href={lead.website} 
+                    target="_blank" 
+                    rel="noreferrer"
+                    className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors group"
+                  >
+                    <div className="p-2 rounded-md bg-muted">
+                      <Globe className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate group-hover:text-foreground">
+                        {(() => {
+                          try { return new URL(lead.website).hostname; } 
+                          catch { return lead.website; }
+                        })()}
+                      </p>
+                    </div>
+                    <ExternalLink className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </a>
+                )}
+                
+                {lead.phone && (
+                  <a 
+                    href={`tel:${lead.phone}`}
+                    className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
+                  >
+                    <div className="p-2 rounded-md bg-muted">
+                      <Phone className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <p className="text-sm font-medium">{lead.phone}</p>
+                  </a>
+                )}
+              </div>
+            </section>
+          )}
 
           {/* Audit Results */}
-          <div>
-            <h3 className="text-base font-semibold mb-4 flex items-center gap-2">
-                Deep Audit Results
-                {lead.audit_completed_at && <span className="text-xs font-normal text-muted-foreground ml-auto">Actualizado: {new Date(lead.audit_completed_at).toLocaleDateString()}</span>}
-            </h3>
-            
-            {/* Grid for Security and Tech Status */}
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <div className="p-3 border rounded-lg bg-muted/50 shadow-sm">
-                <div className="flex items-center gap-2 mb-2">
-                  <Shield className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-xs font-semibold text-muted-foreground uppercase">Security</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {lead.ssl_valid ? (
-                    <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-                      <CheckCircle2 className="h-5 w-5" />
-                      <span className="font-medium text-sm">Secure (SSL)</span>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400">
-                      <XCircle className="h-5 w-5" />
-                      <span className="font-medium text-sm">Insecure</span>
-                    </div>
-                  )}
-                </div>
+          {hasAuditData && (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Website Audit
+                </h3>
+                {lead.audit_completed_at && (
+                  <span className="text-[10px] text-muted-foreground">
+                    {new Date(lead.audit_completed_at).toLocaleDateString()}
+                  </span>
+                )}
               </div>
-
-               <div className="p-3 border rounded-lg bg-muted/50 shadow-sm">
-                <div className="flex items-center gap-2 mb-2">
-                  <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-xs font-semibold text-muted-foreground uppercase">Tech Status</span>
-                </div>
-                <div className="flex items-center">
-                  {lead.web_obsoleta ? (
-                    <Badge variant="destructive" className="h-6">Obsolete</Badge>
-                  ) : lead.website ? (
-                    <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 h-6">Modern Stack</Badge>
-                  ) : (
-                    <Badge variant="secondary" className="h-6">N/A</Badge>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Found Data Grid */}
-            <div className="grid grid-cols-1 gap-4">
-                
-                {/* Emails & Socials Row */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {/* Emails */}
-                    <div className="border rounded-lg p-3 bg-muted/40">
-                        <h4 className="text-xs font-semibold text-muted-foreground mb-3 flex items-center gap-2">
-                            <Mail className="h-3.5 w-3.5" /> Contact Emails
-                        </h4>
-                        {lead.emails && lead.emails.length > 0 ? (
-                            <div className="flex flex-col gap-2">
-                            {lead.emails.map((email) => (
-                                <div key={email} className="flex items-center gap-2 text-sm bg-muted/50 p-1.5 rounded border border-border">
-                                    <div className="h-2 w-2 rounded-full bg-foreground/30 shrink-0" />
-                                    <span className="truncate select-all text-xs font-mono">{email}</span>
-                                </div>
-                            ))}
-                            </div>
-                        ) : (
-                            <div className="text-xs text-muted-foreground py-2 italic opacity-60">No emails found</div>
-                        )}
-                    </div>
-
-                    {/* Socials */}
-                    <div className="border rounded-lg p-3 bg-muted/40">
-                        <h4 className="text-xs font-semibold text-muted-foreground mb-3 flex items-center gap-2">
-                            <Globe className="h-3.5 w-3.5" /> Social Presence
-                        </h4>
-                        {lead.social_links && Object.keys(lead.social_links).length > 0 ? (
-                            <div className="flex flex-col gap-2">
-                            {Object.entries(lead.social_links).map(([network, url]) => (
-                                <a 
-                                key={network} 
-                                href={url} 
-                                target="_blank" 
-                                rel="noreferrer"
-                                className="flex items-center justify-between text-xs px-2 py-1.5 rounded hover:bg-muted border border-transparent hover:border-border transition-colors group"
-                                >
-                                <span className="capitalize font-medium text-foreground/80 group-hover:text-foreground">{network}</span>
-                                <ExternalLink className="h-3 w-3 opacity-30 group-hover:opacity-100" />
-                                </a>
-                            ))}
-                            </div>
-                        ) : (
-                            <div className="text-xs text-muted-foreground py-2 italic opacity-60">No profiles found</div>
-                        )}
-                    </div>
-                </div>
-
-                {/* Tech Stack */}
-                <div className="border rounded-lg p-4 bg-muted/40">
-                    <h4 className="text-xs font-semibold text-muted-foreground mb-3">Technology Stack</h4>
-                    {lead.tech_stack && lead.tech_stack.length > 0 ? (
-                        <div className="flex flex-wrap gap-2">
-                        {lead.tech_stack.map((tech) => (
-                            <Badge key={tech} variant="outline" className="bg-muted/50 text-foreground border-border px-3 py-1">
-                                {tech}
-                            </Badge>
-                        ))}
-                        </div>
+              
+              {/* Security & Tech Status Pills */}
+              <div className="flex flex-wrap gap-2">
+                {lead.ssl_valid !== null && (
+                  <div className={cn(
+                    "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium",
+                    lead.ssl_valid 
+                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" 
+                      : "bg-rose-500/10 text-rose-600 dark:text-rose-400"
+                  )}>
+                    {lead.ssl_valid ? (
+                      <>
+                        <Shield className="h-3.5 w-3.5" />
+                        SSL Secure
+                      </>
                     ) : (
-                        <span className="text-sm text-muted-foreground italic">No technology detected</span>
+                      <>
+                        <XCircle className="h-3.5 w-3.5" />
+                        No SSL
+                      </>
                     )}
+                  </div>
+                )}
+                
+                {lead.web_obsoleta !== null && (
+                  <div className={cn(
+                    "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium",
+                    lead.web_obsoleta 
+                      ? "bg-rose-500/10 text-rose-600 dark:text-rose-400" 
+                      : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                  )}>
+                    {lead.web_obsoleta ? (
+                      <>
+                        <XCircle className="h-3.5 w-3.5" />
+                        Outdated Tech
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        Modern Stack
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Emails */}
+              {hasEmails && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                    <Mail className="h-3.5 w-3.5" />
+                    Emails Found
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {lead.emails!.map((email) => (
+                      <a
+                        key={email}
+                        href={`mailto:${email}`}
+                        className="inline-flex items-center px-2.5 py-1 rounded-md bg-muted hover:bg-muted/80 text-xs font-mono transition-colors"
+                      >
+                        {email}
+                      </a>
+                    ))}
+                  </div>
                 </div>
-            </div>
+              )}
 
-          </div>
+              {/* Social Links */}
+              {hasSocials && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                    <Share2 className="h-3.5 w-3.5" />
+                    Social Presence
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {Object.entries(lead.social_links!).map(([network, url]) => (
+                      <a 
+                        key={network} 
+                        href={url} 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted hover:bg-muted/80 text-xs font-medium capitalize transition-colors"
+                      >
+                        {network}
+                        <ExternalLink className="h-3 w-3 opacity-50" />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-          {/* Raw Data (Collapsible) */}
-          <div className="pt-4 border-t">
-             <details className="text-xs group">
-              <summary className="cursor-pointer text-muted-foreground hover:text-foreground font-medium select-none flex items-center gap-2">
-                  <span>View Raw Audit Data</span>
-                  <span className="group-open:rotate-180 transition-transform text-[10px]">▼</span>
+              {/* Tech Stack */}
+              {hasTechStack && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                    <Code2 className="h-3.5 w-3.5" />
+                    Technologies
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {lead.tech_stack!.map((tech) => (
+                      <Badge 
+                        key={tech} 
+                        variant="secondary" 
+                        className="font-normal"
+                      >
+                        {tech}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* Raw Data - Only if audit_data exists */}
+          {lead.audit_data && Object.keys(lead.audit_data).length > 0 && (
+            <details className="group">
+              <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground font-medium select-none flex items-center gap-2 py-2">
+                <span>Raw Audit Data</span>
+                <span className="group-open:rotate-180 transition-transform text-[10px]">▼</span>
               </summary>
-              <pre className="mt-2 p-3 bg-muted/50 rounded border overflow-x-auto text-[10px] leading-relaxed text-muted-foreground">
-                {JSON.stringify(lead.audit_data || {}, null, 2)}
+              <pre className="mt-2 p-3 bg-muted/50 rounded-lg border overflow-x-auto text-[10px] leading-relaxed text-muted-foreground max-h-48">
+                {JSON.stringify(lead.audit_data, null, 2)}
               </pre>
-             </details>
-          </div>
+            </details>
+          )}
 
         </div>
       </SheetContent>
