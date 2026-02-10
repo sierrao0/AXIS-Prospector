@@ -1,8 +1,8 @@
-# 🕵️‍♂️ SIERRA | Prospector
+# 🕵️‍♂️ Prospector By Sierra
 
 <div align="center">
 
-![AXIS](https://img.shields.io/badge/AXIS-Prospector-blueviolet?style=for-the-badge)
+![Prospector By Sierra](https://img.shields.io/badge/Prospector-By-Sierra-blueviolet?style=for-the-badge)
 ![Python](https://img.shields.io/badge/Python-3.12+-blue?style=for-the-badge&logo=python)
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?style=for-the-badge&logo=next.js)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-green?style=for-the-badge&logo=fastapi)
@@ -18,7 +18,7 @@
 
 ## 🎯 Misión
 
-**Prospector** es el núcleo de prospección inteligente de **Sierra Agency**. No es un simple scraper; es un **motor de inferencia asíncrono** diseñado para descubrir, calificar y auditar prospectos B2B en tiempo real.
+**Prospector By Sierra** es el núcleo de prospección inteligente de **Sierra**. No es un simple scraper; es un **motor de inferencia asíncrono** diseñado para descubrir, calificar y auditar prospectos B2B en tiempo real.
 
 > *"Encontrar el 20% de clientes que generan el 80% del valor."*
 
@@ -132,8 +132,8 @@ Prospector/
 ### 1. Clonar el repositorio
 
 ```bash
-git clone https://github.com/tu-usuario/BusinesScraper.git
-cd BusinesScraper
+git clone https://github.com/tu-usuario/prospector-by-sierra.git
+cd prospector-by-sierra
 ```
 
 ### 2. Configurar variables de entorno
@@ -273,14 +273,14 @@ interface Lead {
 
 ## 📄 Licencia
 
-Este proyecto es privado y pertenece a **AXIS Agency**.
+Este proyecto es privado y pertenece a **Sierra**.
 
 ---
 
 <div align="center">
 
-**AXIS Prospector** — *Transforming raw data into actionable business intelligence.*
+**Prospector By Sierra** — *Transforming raw data into actionable business intelligence.*
 
-Built with ❤️ by the AXIS Team
+Built with ❤️ by Sierra
 
 </div>

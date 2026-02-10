@@ -1,4 +1,4 @@
-# Docker Compose - AXIS Prospector
+# Docker Compose - Prospector By Sierra
 # =================================
 # Uso: docker-compose up -d
 # Variables: Copia .env.example a .env

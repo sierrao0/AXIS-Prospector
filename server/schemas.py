@@ -245,7 +245,7 @@ class LeadsListResponse(BaseModel):
 class HealthResponse(BaseModel):
     """Respuesta del health check."""
     status: str = "ok"
-    service: str = "AXIS Prospector API"
+    service: str = "Prospector By Sierra API"
     version: str = "1.0.0"
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
@@ -264,7 +264,7 @@ class ErrorResponse(BaseModel):
 # AI SCORE CALCULATION - "THE HUNTER LOGIC"
 # =============================================================================
 """
-🧠 The Hunter Logic - Motor de Decisión para AXIS Systems
+🧠 The Hunter Logic - Motor de Decisión para Sierra
 
 Este algoritmo evalúa la "Propensión a la Conversión Técnica" de un lead.
 Busca negocios que NECESITAN servicios de desarrollo web y automatización.
@@ -329,7 +329,7 @@ def calculate_ai_score(lead: "LeadSchema", audit: Optional[AuditResult]) -> int:
     """
     🎯 THE HUNTER LOGIC - Calcula el AI Score de un lead.
     
-    Este algoritmo identifica leads que NECESITAN servicios de AXIS Systems.
+    Este algoritmo identifica leads que NECESITAN servicios de Sierra.
     
     FUNDACIÓN:
     - Base: 50 puntos (punto medio para evaluar hacia arriba o abajo)

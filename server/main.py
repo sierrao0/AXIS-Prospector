@@ -1,5 +1,5 @@
 """
-AXIS Prospector API - Punto de entrada principal.
+Prospector By Sierra API - Punto de entrada principal.
 
 API asíncrona para extracción y gestión de leads usando FastAPI.
 
@@ -17,6 +17,7 @@ import logging
 import hmac
 from typing import Dict, Optional, Tuple
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, status, Request, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -45,7 +46,7 @@ from services.scraper import get_scraper_service, cleanup_scraper
 from services.database import get_database_service, cleanup_database
 from services.analyzer import get_analyzer_service, cleanup_analyzer
 from services.exceptions import (
-    AXISProspectorError,
+    SierraProspectorError,
     ScraperError,
     DatabaseError,
     LeadNotFoundError,
@@ -61,6 +62,55 @@ limiter = Limiter(key_func=get_remote_address)
 # Almacén en memoria para el estado de tareas (en producción usar Redis)
 task_store: Dict[str, Dict] = {}
 recent_queries: Dict[Tuple[str, str], datetime] = {}
+
+# Context variable para task_id en logs
+_task_id_context: ContextVar[Optional[str]] = ContextVar('task_id', default=None)
+
+
+class TaskLoggerAdapter(logging.LoggerAdapter):
+    """Adapter para incluir task_id en los logs."""
+    
+    def process(self, msg, kwargs):
+        task_id = _task_id_context.get()
+        if task_id:
+            return f"[{task_id}] {msg}", kwargs
+        return msg, kwargs
+
+
+def get_task_logger() -> TaskLoggerAdapter:
+    """Obtiene un logger con soporte para task_id."""
+    return TaskLoggerAdapter(logger, {})
+
+
+def separator(char: str = "=", width: int = 100) -> str:
+    """Genera una linea separadora."""
+    return char * width
+
+
+def log_score_analysis(task_logger: TaskLoggerAdapter, lead_name: str, 
+                       ai_score: int, opportunity_score: int, category: str,
+                       audit_result=None) -> None:
+    """
+    Loguea el desglose de los scores de un lead.
+    """
+    # Emoji por score
+    ai_badge = "HOT" if ai_score >= 80 else "WARM" if ai_score >= 60 else "COLD" if ai_score >= 40 else "OPP"
+    
+    if audit_result and audit_result.site_accessible:
+        # Mostrar detalles del audit
+        ssl_status = "SSL_OK" if audit_result.ssl_valid else "NO_SSL"
+        emails_count = len(audit_result.emails) if audit_result.emails else 0
+        socials = audit_result.social_links.count if audit_result.social_links else 0
+        task_logger.info(
+            f"    SCORING: ai={ai_score}/100 | opp={opportunity_score}/100 | "
+            f"cat={category} | {ssl_status} | emails={emails_count} | sociales={socials}"
+        )
+    else:
+        # Lead sin web o sitio inaccesible
+        task_logger.info(
+            f"    SCORING: ai={ai_score}/100 | opp={opportunity_score}/100 | "
+            f"cat={category}"
+        )
 
 
 def _get_client_ip(request: Request) -> str:
@@ -115,7 +165,7 @@ def _verify_api_key(
 async def lifespan(app: FastAPI):
     """Ciclo de vida de la aplicación."""
     # Startup
-    logger.info("🚀 Iniciando AXIS Prospector API...")
+    logger.info("🚀 Iniciando Prospector By Sierra API...")
     try:
         validate_environment()
         logger.info("✅ Variables de entorno validadas")
@@ -133,7 +183,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown - Limpiar recursos
-    logger.info("👋 Cerrando AXIS Prospector API...")
+    logger.info("👋 Cerrando Prospector By Sierra API...")
     await cleanup_scraper()
     await cleanup_database()
     await cleanup_analyzer()
@@ -145,7 +195,7 @@ settings = get_settings()
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="API de prospección automatizada para AXIS Agency",
+    description="API de prospección automatizada para Prospector By Sierra",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -179,8 +229,8 @@ async def add_request_id(request: Request, call_next):
 # Exception Handlers
 # ============================================================================
 
-@app.exception_handler(AXISProspectorError)
-async def axis_error_handler(request: Request, exc: AXISProspectorError):
+@app.exception_handler(SierraProspectorError)
+async def sierra_error_handler(request: Request, exc: SierraProspectorError):
     """Manejador global para errores de la aplicación."""
     logger.error(f"Error de aplicación: {exc.message}")
     return JSONResponse(
@@ -250,39 +300,65 @@ async def ejecutar_prospeccion_async(task_id: str, query: str, max_results: int)
         query: Término de búsqueda
         max_results: Número máximo de resultados
     """
-    logger.info(f"📋 Tarea {task_id}: Iniciando prospección...")
+    # Establecer task_id en el contexto
+    _task_id_context.set(task_id)
+    task_logger = get_task_logger()
+    
+    # Separadores visuales
+    task_logger.info(separator("="))
+    task_logger.info(f"Iniciando prospección: '{query}' (max: {max_results} resultados)")
+    task_logger.info(separator("-"))
+    
     task_store[task_id]["status"] = TaskStatus.RUNNING
 
     try:
         # 1. Extraer leads de Apify (async)
+        task_logger.info("\n[FASE 1] Extracción de Leads (Apify)")
+        task_logger.info(separator("-"))
         scraper = get_scraper_service()
         leads = await scraper.extraer_leads(query, max_results)
 
         # 2. Guardar en Supabase (async)
+        task_logger.info("\n[FASE 2] Guardando Leads en Supabase")
+        task_logger.info(separator("-"))
         db = get_database_service()
         saved_leads = await db.guardar_leads(leads) # Ahora retorna la lista de leads guardados
         count = len(saved_leads)
+        task_logger.info(f"[OK] {count} leads guardados")
 
         # 3. Deep Audit (Async Pipeline)
         if saved_leads:
+            task_logger.info("\n[FASE 3] Deep Audit de Sitios Web")
+            task_logger.info(separator("-"))
             analyzer = get_analyzer_service()
-            logger.info(f"🔍 Iniciando Deep Audit para {count} leads...")
+            task_logger.info(f"Iniciando auditoría de {count} leads...")
             
             # Inicializar tracking de progreso
             task_store[task_id]["progress"] = 0.0
             task_store[task_id]["message"] = f"Iniciando auditoría de {count} leads..."
             processed_count = 0
 
-            async def audit_with_retry(website: str):
+            def _format_lead_tag(lead_data: Dict) -> str:
+                """Construye etiqueta corta para logs por lead."""
+                lead_id = lead_data.get("id", "unknown")
+                name = (lead_data.get("name") or "sin nombre").strip()
+                website = (lead_data.get("website") or "sin web").strip()
+                return f"Lead {lead_id} | {name} | {website}"
+
+            async def audit_with_retry(website: str, lead_tag: str):
                 """Ejecuta auditoría con retry simple y backoff."""
                 attempts = settings.audit_retry_attempts
                 for attempt in range(1, attempts + 1):
+                    task_logger.info(f"    [INTENTO {attempt}/{attempts}] Auditando...")
                     audit = await analyzer.audit_website(website)
                     if audit.site_accessible:
                         return audit
                     if attempt < attempts:
                         wait_seconds = settings.audit_retry_backoff_secs * attempt
-                        logger.warning(f"⚠️ Audit falló, reintentando en {wait_seconds:.1f}s ({attempt}/{attempts})")
+                        task_logger.warning(
+                            f"    [REINTENTO] Audiencia fallida, esperando {wait_seconds:.1f}s "
+                            f"({attempt}/{attempts})"
+                        )
                         await asyncio.sleep(wait_seconds)
                 return audit
             
@@ -291,6 +367,9 @@ async def ejecutar_prospeccion_async(task_id: str, query: str, max_results: int)
                 try:
                     lead_id = lead_data["id"]
                     website = lead_data.get("website")
+                    lead_name = lead_data.get("name", "sin nombre")
+                    lead_tag = _format_lead_tag(lead_data)
+                    task_logger.info(f"  [LEAD] {lead_tag}")
                     
                     # Convertir a esquema para scoring
                     lead_obj = LeadSchema(**lead_data)
@@ -309,13 +388,17 @@ async def ejecutar_prospeccion_async(task_id: str, query: str, max_results: int)
                             "lead_category": category,
                             "audit_completed_at": datetime.utcnow().isoformat()
                         })
-                        logger.info(f"📊 Lead sin web: ai_score={score}, opportunity={opportunity}, category={category}")
+                        task_logger.info(f"    [NO_WEB] Solo presencia en Google Maps")
+                        log_score_analysis(task_logger, lead_name, score, opportunity, category, None)
                     else:
                         # Update status to auditing
                         await db.actualizar_audit_lead(lead_id, {"audit_status": AuditStatus.AUDITING.value})
+                        task_logger.info(f"    [AUDIT] Iniciando auditoria de sitio web...")
 
                         # Execute audit
-                        audit_result = await audit_with_retry(website)
+                        audit_result = await audit_with_retry(website, lead_tag)
+                        if not audit_result.site_accessible:
+                            task_logger.warning(f"    [WARN] Sitio no accesible durante audit")
                         
                         # Calculate Scores - THE HUNTER LOGIC
                         score = calculate_ai_score(lead_obj, audit_result)
@@ -345,7 +428,13 @@ async def ejecutar_prospeccion_async(task_id: str, query: str, max_results: int)
                         
                         # Update DB
                         await db.actualizar_audit_lead(lead_id, update_data)
-                        logger.info(f"📊 Lead auditado: ai_score={score}, opportunity={opportunity}, category={category}")
+                        
+                        # Log audit summary  
+                        ssl_status = f"SSL={audit_result.ssl_valid}"
+                        email_status = f"emails={len(audit_result.emails) if audit_result.emails else 0}"
+                        tech_status = f"tech={audit_result.tech_stack.cms or 'custom'}" if audit_result.tech_stack else "tech=unknown"
+                        task_logger.info(f"    [AUDIT_OK] {ssl_status} | {email_status} | {tech_status}")
+                        log_score_analysis(task_logger, lead_name, score, opportunity, category, audit_result)
                     
                     # Update progress
                     processed_count += 1
@@ -354,7 +443,7 @@ async def ejecutar_prospeccion_async(task_id: str, query: str, max_results: int)
                     task_store[task_id]["message"] = f"Auditando: {processed_count}/{count} leads ({int(progress_pct)}%)"
                     
                 except Exception as e:
-                    logger.error(f"❌ Error auditing lead {lead_data.get('id')}: {e}")
+                    task_logger.error(f"    [ERROR] {str(e)[:80]}")
                     try:
                         await db.actualizar_audit_lead(
                             lead_data["id"], 
@@ -370,34 +459,42 @@ async def ejecutar_prospeccion_async(task_id: str, query: str, max_results: int)
             # La concurrencia está limitada internamente por CONTEXT_SEMAPHORE en analyzer.py
             await asyncio.gather(*[process_audit(l) for l in saved_leads])
             
-            logger.info(f"✅ Deep Audit completado para {count} leads")
+            task_logger.info(separator("-"))
+            task_logger.info(f"[OK] Deep Audit completado para {count} leads")
             task_store[task_id]["progress"] = 100.0
             task_store[task_id]["message"] = "Prospección completada"
 
         # 4. Actualizar estado de la tarea
-
-        # 4. Actualizar estado de la tarea
         task_store[task_id]["status"] = TaskStatus.COMPLETED
         task_store[task_id]["leads_count"] = count
-        logger.info(f"✅ Tarea {task_id}: Completada globalmente.")
+        
+        task_logger.info(separator("="))
+        task_logger.info(f"[SUCCESS] Prospección completada exitosamente | {count} leads procesados")
+        task_logger.info(separator("="))
 
     except ScraperError as e:
         error_msg = f"Error en scraping: {e.message}"
         task_store[task_id]["status"] = TaskStatus.FAILED
         task_store[task_id]["error"] = error_msg
-        logger.error(f"❌ Tarea {task_id}: {error_msg}")
+        task_logger.error(separator("="))
+        task_logger.error(f"[FAILED] ERROR: {error_msg}")
+        task_logger.error(separator("="))
 
     except DatabaseError as e:
         error_msg = f"Error en base de datos: {e.message}"
         task_store[task_id]["status"] = TaskStatus.FAILED
         task_store[task_id]["error"] = error_msg
-        logger.error(f"❌ Tarea {task_id}: {error_msg}")
+        task_logger.error(separator("="))
+        task_logger.error(f"[FAILED] ERROR: {error_msg}")
+        task_logger.error(separator("="))
 
     except Exception as e:
         error_msg = str(e)
         task_store[task_id]["status"] = TaskStatus.FAILED
         task_store[task_id]["error"] = error_msg
-        logger.error(f"❌ Tarea {task_id}: Error inesperado - {error_msg}")
+        task_logger.error(separator("="))
+        task_logger.error(f"[FAILED] ERROR INESPERADO: {error_msg}")
+        task_logger.error(separator("="))
 
 
 # ============================================================================

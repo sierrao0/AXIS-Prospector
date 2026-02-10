@@ -57,7 +57,7 @@ export default function DashboardPage() {
         <div className="container mx-auto flex items-center justify-between px-4 py-4">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-foreground tracking-tight">
-              AXIS Prospector
+              Prospector By Sierra
             </h1>
             <Badge 
               variant={isRealtimeConnected ? 'default' : 'destructive'} 

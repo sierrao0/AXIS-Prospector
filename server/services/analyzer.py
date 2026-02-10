@@ -43,7 +43,7 @@ from schemas import (
     AuditStatus,
     calculate_ai_score
 )
-from services.exceptions import AXISProspectorError
+from services.exceptions import SierraProspectorError
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +138,7 @@ EXCLUDED_EMAIL_PATTERNS = [
 # EXCEPTIONS
 # =============================================================================
 
-class WebAnalysisError(AXISProspectorError):
+class WebAnalysisError(SierraProspectorError):
     """Error durante el análisis de sitio web."""
     pass
 
@@ -481,7 +481,7 @@ class DeepAuditService:
         
         Incluye: SSL, emails (deep crawl), tech detection, social links, meta info.
         """
-        logger.info(f"🔍 Deep audit: {url}")
+        logger.debug(f"Iniciando Deep Audit: {url}")
         start_time = datetime.utcnow()
         
         # Normalize URL
@@ -493,19 +493,27 @@ class DeepAuditService:
         try:
             async with CONTEXT_SEMAPHORE:
                 # Check SSL first (outside of browser)
+                logger.debug(f"  [1/6] Validando SSL...")
                 ssl_valid, ssl_error = await self.check_ssl(url)
                 uses_https = url.startswith("https://") or ssl_valid
+                if ssl_valid:
+                    logger.debug(f"    OK: SSL valido")
+                else:
+                    logger.debug(f"    WARN: {ssl_error}")
                 
                 # Create context and page (stealth already applied to context)
+                logger.debug(f"  [2/6] Creando contexto Playwright...")
                 context = await self._get_context()
                 page = await context.new_page()
                 
                 # Navigate to page
+                logger.debug(f"  [3/6] Navegando a sitio...")
                 response = await page.goto(
                     url, 
                     timeout=PAGE_TIMEOUT_MS, 
                     wait_until="domcontentloaded"
                 )
+                logger.debug(f"    OK: HTTP {response.status if response else '?'}")
                 
                 # Check for WAF/blocking
                 if response and response.status in (403, 406, 429):
@@ -520,10 +528,14 @@ class DeepAuditService:
                 # Calculate response time
                 response_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
                 final_url = page.url
+                logger.debug(f"    OK: Respuesta en {response_time}ms")
                 
                 # Extract all data in parallel
+                logger.debug(f"  [4/6] Extrayendo emails...")
                 emails_task = self.extract_emails_deep(page, url)
+                logger.debug(f"  [5/6] Detectando tecnologias...")
                 tech_task = self.detect_technologies(page)
+                logger.debug(f"  [6/6] Extrayendo redes sociales y meta...")
                 social_task = self.extract_social_links(page)
                 meta_task = self.extract_meta_info(page)
                 
@@ -531,18 +543,27 @@ class DeepAuditService:
                     emails_task, tech_task, social_task, meta_task
                 )
                 
+                logger.debug(f"    OK: Emails={len(emails)}, Tech={tech_stack.cms or 'N/A'}, Sociales={social_links.count}")
+                
                 has_description, has_viewport, title = meta_info
                 
                 # Determine if site is obsolete
+                logger.debug(f"  Evaluando obsolescencia del sitio...")
                 is_obsolete, obsolete_reasons = self._evaluate_obsolescence(
                     tech_stack, has_description, has_viewport
                 )
+                if is_obsolete:
+                    logger.debug(f"    WARN: Sitio obsoleto - {obsolete_reasons}")
+                else:
+                    logger.debug(f"    OK: Sitio moderno")
                 
                 # Check for domain email
                 has_domain_email = False
                 if emails:
                     domain = urlparse(url).netloc.replace("www.", "")
                     has_domain_email = any(domain in email for email in emails)
+                    if has_domain_email:
+                        logger.debug(f"    OK: Encontrado email corporativo")
                 
                 result = AuditResult(
                     site_accessible=True,
@@ -562,11 +583,12 @@ class DeepAuditService:
                     obsolete_reasons=obsolete_reasons,
                 )
                 
-                # Log result
-                score_preview = "SSL✅" if ssl_valid else "SSL❌"
-                email_preview = f"📧{len(emails)}" if emails else "📧0"
-                social_preview = f"🔗{social_links.count}"
-                logger.info(f"✅ {url}: {score_preview} {email_preview} {social_preview}")
+                # Log result summary
+                ssl_badge = "OK" if ssl_valid else "WARN"
+                email_badge = f"emails={len(emails)}" if emails else "NO_EMAILS"
+                social_badge = f"sociales={social_links.count}" if social_links.count > 0 else "SIN_SOCIALES"
+                tech_badge = tech_stack.cms or "custom"
+                logger.info(f"AUDIT_COMPLETE: [{ssl_badge}] [{email_badge}] [{social_badge}] [tech={tech_badge}]")
                 
                 return result
                 

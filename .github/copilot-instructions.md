@@ -1,8 +1,8 @@
-# BusinesScraper - Copilot Instructions
+# Prospector By Sierra - Copilot Instructions
 
 ## Architecture Overview
 
-BusinesScraper is an async B2B lead prospecting system for AXIS Agency. Two-tier architecture:
+Prospector By Sierra is an async B2B lead prospecting system for Sierra. Two-tier architecture:
 - **Frontend** (`client/`): Next.js 16 + React 19 dashboard with Supabase Realtime
 - **Backend** (`server/`): FastAPI async API with background task processing
 
@@ -76,7 +76,7 @@ Root `.env` file (copy from `.env.example`):
 
 ### Backend (Python)
 - Pydantic V2: Use `field_validator`, `computed_field`, `model_config` dict
-- Custom exceptions inherit from `AXISProspectorError` ([exceptions.py](server/services/exceptions.py))
+- Custom exceptions inherit from `SierraProspectorError` ([exceptions.py](server/services/exceptions.py))
 - Retry with tenacity: `@retry(stop=stop_after_attempt(3), wait=wait_exponential(...))`
 - Rate limiting via `@limiter.limit()` decorator on endpoints
 
@@ -107,8 +107,5 @@ Supabase `leads` table:
 
 ## Current Gaps (Phase 1)
 
-See [PHASE1_IMPLEMENTATION_PLAN.md](PHASE1_IMPLEMENTATION_PLAN.md) for full status. Key remaining:
-- Deep Audit integration into background pipeline
-- `ai_score` column and calculation in DB
-- Lead Detail Sheet component
+Key remaining:
 - RLS policies for production security

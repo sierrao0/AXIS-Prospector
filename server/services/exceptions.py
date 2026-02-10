@@ -4,7 +4,7 @@ Excepciones personalizadas para la aplicación.
 from typing import Optional
 
 
-class AXISProspectorError(Exception):
+class SierraProspectorError(Exception):
     """Excepción base para errores de la aplicación."""
 
     def __init__(self, message: str, detail: Optional[str] = None):
@@ -13,7 +13,7 @@ class AXISProspectorError(Exception):
         super().__init__(self.message)
 
 
-class ScraperError(AXISProspectorError):
+class ScraperError(SierraProspectorError):
     """Error durante el proceso de scraping."""
     pass
 
@@ -28,7 +28,7 @@ class ApifyTimeoutError(ScraperError):
     pass
 
 
-class DatabaseError(AXISProspectorError):
+class DatabaseError(SierraProspectorError):
     """Error de base de datos."""
     pass
 
@@ -43,11 +43,11 @@ class LeadNotFoundError(DatabaseError):
     pass
 
 
-class RateLimitExceededError(AXISProspectorError):
+class RateLimitExceededError(SierraProspectorError):
     """Límite de requests excedido."""
     pass
 
 
-class ValidationError(AXISProspectorError):
+class ValidationError(SierraProspectorError):
     """Error de validación de datos."""
     pass

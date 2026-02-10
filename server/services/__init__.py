@@ -1,5 +1,5 @@
 """
-Servicios de la aplicación AXIS Prospector.
+Servicios de la aplicación Prospector By Sierra.
 
 Módulos:
 - scraper: Extracción de leads desde Google Maps via Apify
@@ -10,7 +10,7 @@ Módulos:
 from services.scraper import get_scraper_service, cleanup_scraper
 from services.database import get_database_service, cleanup_database
 from services.exceptions import (
-    AXISProspectorError,
+    SierraProspectorError,
     ScraperError,
     ApifyConnectionError,
     ApifyTimeoutError,
@@ -27,7 +27,7 @@ __all__ = [
     "cleanup_scraper",
     "cleanup_database",
     # Exceptions
-    "AXISProspectorError",
+    "SierraProspectorError",
     "ScraperError",
     "ApifyConnectionError",
     "ApifyTimeoutError",

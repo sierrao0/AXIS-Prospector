@@ -1,4 +1,4 @@
-# AXIS Prospector API - Copilot Instructions
+# Prospector By Sierra API - Copilot Instructions
 
 ## Architecture Overview
 
@@ -10,7 +10,7 @@ This is an async FastAPI application for lead prospecting from Google Maps, stor
 - `main.py` (root) - FastAPI app with endpoints, rate limiting (slowapi), and background tasks
 - `Backend/services/scraper.py` - Apify integration via ThreadPoolExecutor for async wrapping
 - `Backend/services/database.py` - Supabase CRUD with batch operations
-- `Backend/services/exceptions.py` - Custom exception hierarchy rooted at `AXISProspectorError`
+- `Backend/services/exceptions.py` - Custom exception hierarchy rooted at `SierraProspectorError`
 
 ## Critical Patterns
 
@@ -44,7 +44,7 @@ Leads with websites are analyzed to detect obsolete sites via [Backend/services/
 - Uses async browser with semaphore for controlled concurrency
 
 ### Exception Hierarchy
-All custom exceptions inherit from `AXISProspectorError`. Use specific exceptions:
+All custom exceptions inherit from `SierraProspectorError`. Use specific exceptions:
 - `ScraperError`, `ApifyConnectionError`, `ApifyTimeoutError` - scraping issues
 - `DatabaseError`, `SupabaseConnectionError`, `LeadNotFoundError` - database issues
 

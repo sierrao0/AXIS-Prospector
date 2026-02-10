@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     """Configuración de la aplicación usando Pydantic Settings."""
 
     # API
-    app_name: str = "AXIS Prospector API"
+    app_name: str = "Prospector By Sierra API"
     app_version: str = "1.1.0"
     debug: bool = False
     api_key: str = Field(
@@ -104,9 +104,26 @@ def setup_logging(level: Optional[str] = None) -> None:
     settings = get_settings()
     log_level = level or settings.log_level
     
-    # Formato con colores para terminal
+    # Formato mejorado para terminal con mejor legibilidad
     formatter = logging.Formatter(
-        "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        "%(asctime)s | %(levelname)-8s | %(name)-28s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    
+    # Agregar espaciado extra entre logs para mejorar legibilidad
+    class SpacingFormatter(logging.Formatter):
+        """Formatter con espaciado extra entre logs de diferentes módulos."""
+        _last_logger = None
+        
+        def format(self, record):
+            # Agregar linea en blanco si cambió el logger
+            if self._last_logger and self._last_logger != record.name.split('.')[0]:
+                print()  # Línea en blanco
+            self._last_logger = record.name.split('.')[0]
+            return super().format(record)
+    
+    formatter = SpacingFormatter(
+        "%(asctime)s | %(levelname)-8s | %(name)-28s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S"
     )
     
